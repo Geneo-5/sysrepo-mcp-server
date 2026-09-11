@@ -1,0 +1,59 @@
+################################################################################
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# This file is part of sysrepo-mcp-server.
+# Copyright (C) 2025 Grégor Boirie <gregor.boirie@free.fr>
+################################################################################
+
+# Doxygen configuration file for sysrepo-mcp-server
+# Generated from extern/stroll/sphinx/Doxyfile template
+
+PROJECT_NAME           = "sysrepo-mcp-server"
+PROJECT_NUMBER         = $(VERSION)
+OUTPUT_DIRECTORY       = sphinx/_doxygen
+
+CREATE_PDF             = NO
+PDF_HYPERLINKS         = NO
+USE_PDFLATEX           = No
+
+HTML_OUTPUT            = _doxygen
+HTML_HEADER            =
+HTML_FOOTER            =
+HTML_STYLESHEET        =
+
+GENERATE_LATEX         = NO
+
+CORRECT_LINKING        = YES
+IGNORE_PREFIX           = 
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_LOCAL_METHODS  = YES
+EXTRACT_PRIV_STATIC    = NO
+HIDE_SCOPE_NAMES       = NO
+
+INPUT                  = ../include
+RECURSIVE              = YES
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.h
+RECURSIVE_FILTER       = 0
+
+SOURCE_BROWSER         = NO
+GENERATE_TREEVIEW      = NO
+GENERATE_DOCUMENTATION = YES
+GENERATE_HTMLHELP      = NO
+GENERATE_QHP           = NO
+GENERATE_RTF           = NO
+RTF_HYPERLINKS         = NO
+LATEX_OUTPUT           = 
+XML_OUTPUT             = xml
+XML_PROGRAMLISTING     = NO
+WARN_FORMAT            = "$file:$line: $text"
+WARN_LOGFILE           = 
+WARN_NO_PARAMDOC       = YES
+ENABLE_PREPROCESSING   = YES
+PREDEFINED             = CONFIG_SYSREPO_MCP_SERVER_SYSLOG=\
+                       CONFIG_SYSREPO_MCP_SERVER_VERBOSE=0
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEFINED = NO
