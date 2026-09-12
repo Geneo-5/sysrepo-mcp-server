@@ -1,4 +1,5 @@
 extern/
+build/
 # Prerequisites
 *.d
 

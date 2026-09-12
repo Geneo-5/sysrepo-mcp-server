@@ -1,0 +1,18 @@
+# Keep extern/ in the context : the build image compiles and installs the
+# external libraries (ebuild, utils, stroll, fcgi2, libyang, sysrepo) from
+# the vendored sources in extern/ (see docker/Dockerfile).
+
+# Git
+.git
+.gitignore
+
+# Build artifacts
+build/
+*.o
+*.so
+*.a
+
+# Documentation
+doc/
+docs/
+sphinx/_build

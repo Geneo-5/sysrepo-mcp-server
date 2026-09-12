@@ -39,6 +39,11 @@ en temps réel.
 - **AI Agent**: Peut interagir avec le serveur pour lire/modifier la
   configuration et recevoir des notifications
 
+## Règles importantes
+
+- Le dossier `extern/` est un dossier de sources externes utilisé comme code de
+  référence. **Il ne doit jamais être modifié.**
+
 ## Dépendances
 
 Toutes les dépendances sont incluses dans le dossier `extern/` et versionnées

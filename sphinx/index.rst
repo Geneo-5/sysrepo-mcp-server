@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
 # This file is part of sysrepo-mcp-server.
-# Copyright (C) 2025 Grégor Boirie <gregor.boirie@free.fr>
+# Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
 
 .. include:: <isonum.txt>
@@ -10,7 +10,7 @@
 Welcome to sysrepo-mcp-server documentation
 ##########################################
 
-**Copyright** |copy| 2025 Grégor Boirie.
+**Copyright** |copy| 2026 Loic JOURDHEUIL SELLIN.
 
 This manual is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software

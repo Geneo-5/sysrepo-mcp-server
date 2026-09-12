@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
 # This file is part of sysrepo-mcp-server.
-# Copyright (C) 2025 Grégor Boirie <gregor.boirie@free.fr>
+# Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
 # -*- coding: utf-8 -*-
 #
@@ -53,8 +53,8 @@ master_title = u'sysrepo-mcp-server Documentation'
 
 # General information about the project.
 project = u'sysrepo-mcp-server'
-copyright = u'2025 Grégor Boirie'
-author = u'Grégor Boirie'
+copyright = u'2026 Loic JOURDHEUIL SELLIN'
+author = u'Loic JOURDHEUIL SELLIN'
 
 # The version info for the project you\'re documenting, acts as a replacement for
 # |version| and |release|, also used in various other places throughout
@@ -133,7 +133,7 @@ latex_elements = {
 latex_documents = [
     (root_doc, 'sysrepo-mcp-server.tex',
      'sysrepo-mcp-server Documentation',
-     'Grégor Boirie', 'manual'),
+     'Loic JOURDHEUIL SELLIN', 'manual'),
 ]
 
 # -- Options for manual page output ---------------------------------------
