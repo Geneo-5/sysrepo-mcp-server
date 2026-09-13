@@ -1,14 +1,9 @@
-################################################################################
-# SPDX-License-Identifier: GPL-3.0-only
-#
-# This file is part of sysrepo-mcp-server.
-# Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
-################################################################################
+.. Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 
 Integration Guide
 =================
 
-This chapter describes how to build and install sysrepo-mcp-server.
+This chapter describes how to build and install sysrepo-mcp.
 
 Prerequisites
 -------------
@@ -75,11 +70,8 @@ The following configuration options are available in ``config.in``:
 ``CONFIG_SYSREPO_MCP_SERVER_SYSLOG``
    Enable syslog logging (default: ``y``)
 
-``CONFIG_SYSREPO_MCP_SERVER_VERBOSE``
-   Enable verbose debugging output (default: ``n``)
-
-``CONFIG_SYSREPO_MCP_SERVER_SYSREPO_SOCK_PATH``
-   Sysrepo daemon socket path (default: ``/var/run/sysrepod.sock``)
+``CONFIG_SYSREPO_MCP_SERVER_USERNAME``
+   Sysrepo library username for sessions (default: ``"mcp"``)
 
 ``CONFIG_SYSREPO_MCP_SERVER_MCP_SOCK_PATH``
    MCP server socket path (default: ``/var/run/sysrepo-mcp.sock``)
@@ -89,7 +81,7 @@ Usage
 
 Start the server::
 
-   sysrepo-mcp-server [--help] [--version]
+   sysrepo-mcp [--help] [--version]
 
 The ``--help`` option prints a help message and exits. The ``--version`` option
 prints the version number and exits.

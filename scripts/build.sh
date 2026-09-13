@@ -2,7 +2,7 @@
 ################################################################################
 # SPDX-License-Identifier: LGPL-3.0-only
 #
-# This file is part of sysrepo-mcp-server.
+# This file is part of sysrepo-mcp.
 # Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
 set -euo pipefail
@@ -17,7 +17,7 @@ export LIBRARY_PATH="/usr/local/lib:$LIBRARY_PATH"
 export C_INCLUDE_PATH="/usr/local/include:$C_INCLUDE_PATH"
 export CPLUS_INCLUDE_PATH="/usr/local/include:$CPLUS_INCLUDE_PATH"
 
-echo "==> Building sysrepo-mcp-server in $PROJECT_DIR"
+echo "==> Building sysrepo-mcp in $PROJECT_DIR"
 
 cd "$PROJECT_DIR"
 
@@ -36,4 +36,4 @@ echo "==> Running make install..."
 make install PREFIX=/usr/local || true
 
 echo "==> Build complete!"
-echo "  Binary: $PROJECT_DIR/build/sysrepo-mcp-server"
+echo "  Binary: $PROJECT_DIR/build/sysrepo-mcp"

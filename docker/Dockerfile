@@ -26,9 +26,6 @@ ENV CFLAGS="-O2 -g -fstack-protector-strong -D_FORTIFY_SOURCE=2"
 ENV CXXFLAGS="-O2 -g -fstack-protector-strong -D_FORTIFY_SOURCE=2"
 ENV LDFLAGS="-Wl,-z,relro,-z,now"
 
-# Runtime library path : the extern/ libraries are installed under /usr/local.
-ENV LD_LIBRARY_PATH="/usr/local/lib"
-
 # ----------------------------------------------------------------------------
 # 1. System packages
 # ----------------------------------------------------------------------------
@@ -93,11 +90,10 @@ RUN apt-get update && \
         tex-gyre \
         latexmk \
         texinfo \
-        texlive-fonts-general \
         graphviz \
-    && rm -rf /var/lib/apt/lists/* && \
+    && rm -rf /var/lib/apt/lists/*
     # Refresh TeX path database so that kpsewhich finds .sty in /usr/share/texmf
-    texhash 2>/dev/null || true && \
+RUN texhash 2>/dev/null || true && \
     updmap-sys --syncwithtrees 2>/dev/null || true
 RUN pip install --break-system-packages kconfiglib
 RUN pip install --break-system-packages sphinx sphinx-rtd-theme breathe

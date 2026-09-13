@@ -1,4 +1,4 @@
-# sysrepo-mcp-server
+# sysrepo-mcp
 
 Serveur MCP (Model Context Protocol) qui expose les fonctionnalités de
 [sysrepo](https://github.com/sysrepo/sysrepo) à un agent IA. Il permet de
@@ -42,8 +42,8 @@ installées** (voir [Prérequis](#prérequis)). Le workflow standard est :
 
 ```sh
 make config     # génère build/.config + build/config.h (Kconfig menuconfig)
-make            # compile le binaire build/sysrepo-mcp-server
-make install    # installe /usr/local/bin/sysrepo-mcp-server
+make            # compile le binaire build/sysrepo-mcp
+make install    # installe /usr/local/bin/sysrepo-mcp
 ```
 
 `make config` ouvre l'interface `menuconfig` du système eBuild pour
@@ -84,7 +84,7 @@ dans [docker/README.md](docker/README.md).
 ## Utilisation
 
 ```sh
-./build/sysrepo-mcp-server [options]
+./build/sysrepo-mcp [options]
 
   --help          Aide
   --version       Version
@@ -101,7 +101,6 @@ server {
     transport "tcp";            // "tcp" ou "unix"
 
     sysrepo {
-        socket_path "/var/run/sysrepo/sysrepod.sock";
         username "sysrepo-mcp";
         connection_timeout 5000;
     };

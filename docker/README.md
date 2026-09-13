@@ -1,7 +1,7 @@
 # docker/ — Build environment (Docker)
 
 This directory contains a self-contained **build environment** image for
-sysrepo-mcp-server, meant for **CI and agent-driven builds** — not the usual
+sysrepo-mcp, meant for **CI and agent-driven builds** — not the usual
 development workflow (see the root [README](../README.md) for the standard
 `make`-based build, which assumes the dependencies are already installed on
 the build host).
@@ -30,7 +30,7 @@ make -C docker build-nc
 ```
 
 Both targets first take care of `extern/` (see below), then run
-`docker build -t sysrepo-mcp-server:latest -f docker/Dockerfile .` from the
+`docker build -t sysrepo-mcp:latest -f docker/Dockerfile .` from the
 repository root.
 
 The `extern/` sources are downloaded and extracted from their versioned

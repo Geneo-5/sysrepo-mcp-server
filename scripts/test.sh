@@ -1,9 +1,9 @@
 #!/bin/bash
 #
 # ==============================================================================
-# sysrepo-mcp-server -- Docker test runner
+# sysrepo-mcp -- Docker test runner
 #
-# Spins up the sysrepo-mcp-server *build environment* image and runs
+# Spins up the sysrepo-mcp *build environment* image and runs
 # `make test` inside it (which builds the project and runs the test suite).
 #
 # The image (built by scripts/build.sh) is a build environment only: it holds

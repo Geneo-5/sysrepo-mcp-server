@@ -1,4 +1,4 @@
-# sysrepo-mcp-server
+# sysrepo-mcp
 
 ## Description
 
@@ -27,32 +27,32 @@ en temps réel.
 ```
 +-------------+      +----------------------+      +-----------------+
 |   AI Agent  |<---->|  Reverse Proxy       |<---->|  sysrepo-mcp    |
-| (OpenHands  |      |  (lighttpd)          |      |  Server         |
-|  SDK, etc.) |      |                      |      |  (FastCGI)      |
-+-------------+      +----------------------+      +--------+--------+
-                           |                               |
-                           |                               |
-                           +-------------------------------+
-                                                           |
-                                                           v
-                                                   +-----------------+
-                                                   |   Sysrepo       |
-                                                   |   Daemon        |
-                                                   |   (sysrepod)    |
-                                                   +--------+--------+
-                                                           |
-                                                           v
-                                                   +-----------------+
-                                                   |  YANG Models    |
-                                                   |  (Datastore)    |
-                                                   +-----------------+
+| (OpenHands  |      |  (lighttpd)          |<---->|  (Stream)       |
+|  SDK, etc.) |      |                      |      +-----------------+
++-------------+      |  - HTTP/HTTPS        |                  |
+                     |  - TLS termination   |                  |
+                     |  - Load balancing    |                  |
+                     |  - Rate limiting     |                  |
+                     +----------------------+                  |
+                                                             \(\bigtriangledown\)
+                                                    +-----------------+
+                                                    |  Sysrepo Lib. |
+                                                    |  (linked)     |
+                                                    +--------+--------+
+                                                             |
+                                                             \(\bigtriangledown\)
+                                                    +-----------------+
+                                                    |  YANG Models    |
+                                                    |  (Datastore)    |
+                                                    +-----------------+
 ```
 
-- **sysrepo** : Système de stockage de configuration basé sur les modèles YANG
+- **sysrepo** : Bibliothèque C liée au binaire qui fournit les opérations
+  NETCONF sur les modèles YANG
 - **MCP Server** : Couche d'abstraction qui expose les opérations sysrepo via
   le protocole Model Context Protocol
 - **Reverse Proxy (lighttpd)** : Gère HTTP/HTTPS, TLS, et forward les requêtes
-  vers sysrepo-mcp-server via FastCGI
+  vers sysrepo-mcp via un flux (socket Unix ou TCP)
 - **AI Agent** : Peut interagir avec le serveur pour lire/modifier la
   configuration et recevoir des notifications
 
@@ -135,8 +135,8 @@ produit du HTML, du PDF et des pages de man sans erreur.
 La documentation générée se trouve dans :
 
 - **HTML** : `build/doc/html/index.html`
-- **PDF** : `build/doc/pdf/sysrepo-mcp-server.pdf`
-- **Info** : `build/doc/info/sysrepo-mcp-server.info`
+- **PDF** : `build/doc/pdf/sysrepo-mcp.pdf`
+- **Info** : `build/doc/info/sysrepo-mcp.info`
 - **Man** : `build/doc/man/`
 
 ### Rebuild de l'image Docker
@@ -158,7 +158,7 @@ Pour forcer un rebuild complet (téléchargement des sources + reconstruction de
 ## Structure du projet
 
 ```
-sysrepo-mcp-server/
+sysrepo-mcp/
 ├── extern/                   # Dépendances (sous-modules Git)
 │   ├── ebuild/              # Système de build
 │   ├── utils/               # eTux utilities
@@ -192,7 +192,7 @@ installées séparément.
 ## Utilisation
 
 ```bash
-./sysrepo-mcp-server [--help] [--version]
+./sysrepo-mcp [--help] [--version]
 ```
 
 Le serveur démarrera et exécutera le protocole MCP sur une socket Unix ou TCP

@@ -10,7 +10,7 @@
 ################################################################################
 
 # Docker variables
-DOCKER_IMAGE    := sysrepo-mcp-server
+DOCKER_IMAGE    := sysrepo-mcp
 DOCKER_TAG      := latest
 DOCKERFILE	:= Dockerfile
 DOCKER_CONTEXT  := ..

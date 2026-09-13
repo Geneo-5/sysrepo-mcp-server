@@ -1,11 +1,11 @@
 ################################################################################
 # SPDX-License-Identifier: LGPL-3.0-only
 #
-# This file is part of sysrepo-mcp-server.
+# This file is part of sysrepo-mcp.
 # Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
 
-override PACKAGE  := sysrepo-mcp-server
+override PACKAGE  := sysrepo-mcp
 override VERSION  := 0.1
 EXTRA_CFLAGS     := -O2 -DNDEBUG -Wall -Wextra -Wformat=2
 EXTRA_LDFLAGS    := -O2

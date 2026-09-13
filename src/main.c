@@ -1,7 +1,7 @@
 /******************************************************************************
  * SPDX-License-Identifier: LGPL-3.0-only
  *
- * This file is part of sysrepo-mcp-server.
+ * This file is part of sysrepo-mcp.
  * Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
  ******************************************************************************/
 
@@ -46,14 +46,12 @@
 #define ACL_NACM_USER_DEFAULT       "mcp"
 #define ACL_NACM_USERS_DEFAULT      "mcp:operators"
 #define ACL_DENY_UNKNOWN_DEFAULT    1
-#define SR_SOCKET_DEFAULT           "/var/run/sysrepo/sysrepod.sock"
 #define SR_USERNAME_DEFAULT         "mcp"
-#define SR_PASSWORD_DEFAULT         ""
 #define SR_TIMEOUT_DEFAULT          5000
 #define LOG_SYSLOG_DEFAULT          1
 #define LOG_LEVEL_DEFAULT           6
 #define LOG_CONSOLE_DEFAULT         0
-#define LOG_FILE_DEFAULT            "/var/log/sysrepo-mcp-server.log"
+#define LOG_FILE_DEFAULT            "/var/log/sysrepo-mcp.log"
 #define LOG_DAILY_ROTATE_DEFAULT    1
 
 #ifdef CONFIG_SYSREPO_MCP_SERVER_SYSLOG
@@ -62,7 +60,7 @@
 
 #ifdef CONFIG_SYSREPO_MCP_SERVER_VERBOSE
 #define sysrepo_mcp_server_debug(fmt, ...) \
-        fprintf(stderr, "sysrepo-mcp-server: " fmt "\n", ##__VA_ARGS__)
+        fprintf(stderr, "sysrepo-mcp: " fmt "\n", ##__VA_ARGS__)
 #else  /* !CONFIG_SYSREPO_MCP_SERVER_VERBOSE */
 #define sysrepo_mcp_server_debug(fmt, ...)
 #endif /* defined(CONFIG_SYSREPO_MCP_SERVER_VERBOSE) */
@@ -96,11 +94,9 @@ struct sysrepo_mcp_server_config {
         int   deny_unknown;
 #endif /* ACL_ENABLED */
 
-        /* Sysrepo connection */
-        char *sr_socket_path;
+        /* Sysrepo library connection */
         char *sr_username;
-        char *sr_password;
-        int   sr_connection_timeout;
+        int   sr_timeout;
 
         /* Logging (elog defaults) */
 #if LOG_SYSLOG_DEFAULT
@@ -151,11 +147,9 @@ sysrepo_mcp_server_config_defaults(void)
         config.deny_unknown     = ACL_DENY_UNKNOWN_DEFAULT;
 #endif /* ACL_ENABLED */
 
-        /* Sysrepo connection */
-        config.sr_socket_path     = strdup(SR_SOCKET_DEFAULT);
-        config.sr_username        = strdup(SR_USERNAME_DEFAULT);
-        config.sr_password        = strdup(SR_PASSWORD_DEFAULT);
-        config.sr_connection_timeout = SR_TIMEOUT_DEFAULT;
+        /* Sysrepo library connection */
+        config.sr_username     = strdup(SR_USERNAME_DEFAULT);
+        config.sr_timeout      = SR_TIMEOUT_DEFAULT;
 
         /* Logging (elog) */
 #if LOG_SYSLOG_DEFAULT
@@ -181,7 +175,7 @@ static void
 sysrepo_mcp_server_print_config(
         const struct sysrepo_mcp_server_config *config)
 {
-        printf("sysrepo-mcp-server configuration (compile-time defaults):\n");
+        printf("sysrepo-mcp configuration (compile-time defaults):\n");
         printf("  endpoint          = %s\n", config->endpoint);
         printf("  session_ttl       = %d\n", config->session_ttl);
         printf("  max_sessions      = %d\n", config->max_sessions);
@@ -205,9 +199,8 @@ sysrepo_mcp_server_print_config(
         printf("  deny_unknown      = %d\n", config->deny_unknown);
 #endif /* ACL_ENABLED */
 
-        printf("  sr_socket_path    = %s\n", config->sr_socket_path);
         printf("  sr_username       = %s\n", config->sr_username);
-        printf("  sr_timeout        = %d\n", config->sr_connection_timeout);
+        printf("  sr_timeout        = %d\n", config->sr_timeout);
         printf("  log_level         = %d\n", config->log_level);
         printf("  log_file          = %s\n", config->log_file);
 }
@@ -234,8 +227,7 @@ sysrepo_mcp_server_config_free(
         free(config->nacm_users);
 #endif /* ACL_ENABLED */
 
-        free(config->sr_socket_path);
-        free(config->sr_password);
+        free(config->sr_username);
         free(config->log_file);
 }
 
@@ -254,27 +246,27 @@ main(int argc, char *argv[])
         struct sysrepo_mcp_server_config config;
 
         if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-                printf("sysrepo-mcp-server: sysrepo to MCP bridge\n");
-                printf("Usage: sysrepo-mcp-server [options]\n");
+                printf("sysrepo-mcp: sysrepo to MCP bridge\n");
+                printf("Usage: sysrepo-mcp [options]\n");
                 printf("  --help        Show this help\n");
                 printf("  --version     Show version\n");
                 return 0;
         }
 
         if (argc > 1 && strcmp(argv[1], "--version") == 0) {
-                printf("sysrepo-mcp-server " PACKAGE_VERSION "\n");
+                printf("sysrepo-mcp " PACKAGE_VERSION "\n");
                 return 0;
         }
 
         /* Install signal handlers */
         if (signal(SIGINT, server_signal_handler) == SIG_ERR) {
-                fprintf(stderr, "sysrepo-mcp-server: failed to install "
+                fprintf(stderr, "sysrepo-mcp: failed to install "
                                "SIGINT handler: %s\n", strerror(errno));
                 return 1;
         }
 
         if (signal(SIGTERM, server_signal_handler) == SIG_ERR) {
-                fprintf(stderr, "sysrepo-mcp-server: failed to install "
+                fprintf(stderr, "sysrepo-mcp: failed to install "
                                "SIGTERM handler: %s\n", strerror(errno));
                 return 1;
         }
@@ -289,8 +281,39 @@ main(int argc, char *argv[])
         /* TODO: Initialize sysrepo connection */
         sysrepo_mcp_server_debug("Initializing sysrepo connection");
 
-        /* TODO: Initialize MCP server (FastCGI listener) */
+        /* TODO: Initialize MCP server (stream listener) */
         sysrepo_mcp_server_debug("Initializing MCP server");
+
+        /* TODO: Register MCP tools */
+        /* Available MCP tools (to be implemented):
+         *
+         * Configuration:
+         *   sr_get_config  - Read config from YANG module (module, xpath, datastore, depth)
+         *   sr_edit_config - Apply config changes to YANG module (module, config, target, xpath)
+         *   sr_copy_config - Copy config between datastores (source, target, xpath)
+         *
+         * Operational:
+         *   sr_get_operational  - Read operational data (xpath, datastore, depth)
+         *
+         * Subscriptions:
+         *   sr_subscribe_oper_changes - Subscribe to operational changes (xpath, cb_type)
+         *   sr_subscribe_notifs       - Subscribe to notifications (xpath, event_type)
+         *
+         * Module Management:
+         *   sr_module_install    - Install YANG module (yang_file, features, imports)
+         *   sr_module_uninstall  - Uninstall YANG module (module_name)
+         *
+         * RPC / Actions:
+         *   sr_execute_rpc - Execute raw NETCONF RPC (rpc_name, input_params, xpath)
+         *   sr_action      - Execute YANG action (module, action_name, input_params, xpath)
+         *
+         * System Status:
+         *   get_status     - Server health (version, uptime, session_count, verbose)
+         *
+         * YANG Explorer:
+         *   get_tree       - YANG schema tree (module, revision, path, with-comments)
+         *   get_help       - Node documentation (xpath, module)
+         */
 
         /* TODO: Run event loop */
         while (!server_stopping) {

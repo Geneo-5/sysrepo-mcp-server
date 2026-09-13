@@ -2,7 +2,7 @@
 ################################################################################
 # SPDX-License-Identifier: LGPL-3.0-only
 #
-# This file is part of sysrepo-mcp-server.
+# This file is part of sysrepo-mcp.
 # Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
 
@@ -10,7 +10,7 @@ set -euo pipefail
 
 # Project root (where this script lives)
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DOCKER_IMAGE="sysrepo-mcp-server"
+DOCKER_IMAGE="sysrepo-mcp"
 DOCKER_TAG="latest"
 
 # Current user and group IDs (matches docker/Makefile convention)
@@ -29,7 +29,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 usage() {
     echo "Usage: $(basename "$0") [options]"
     echo ""
-    echo "Build and test sysrepo-mcp-server inside Docker."
+    echo "Build and test sysrepo-mcp inside Docker."
     echo ""
     echo "Options:"
     echo "  --doc        Build documentation (html, pdf, man)"
@@ -185,7 +185,7 @@ docker run --rm -u "${DOCKER_UID}" \
     "${DOCKER_IMAGE}:${DOCKER_TAG}" \
     make 2>&1 | grep -v "avertissement" | grep -v "can't cd" | grep -v "ModuleNotFoundError" | grep -v "Traceback" || true
 
-log_info "Build complete. Binary: ${PROJECT_DIR}/build/sysrepo-mcp-server"
+log_info "Build complete. Binary: ${PROJECT_DIR}/build/sysrepo-mcp"
 
 # Step 5: Smoke test (if requested)
 if [ "$TEST" -eq 1 ]; then
@@ -197,7 +197,7 @@ if [ "$TEST" -eq 1 ]; then
         -v "${PROJECT_DIR}:${PROJECT_DIR}" \
         -w "${PROJECT_DIR}" \
         "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-        "${PROJECT_DIR}/build/sysrepo-mcp-server" --help
+        "${PROJECT_DIR}/build/sysrepo-mcp" --help
 
     # Test --version
     log_info "  Testing --version ..."
@@ -205,7 +205,7 @@ if [ "$TEST" -eq 1 ]; then
         -v "${PROJECT_DIR}:${PROJECT_DIR}" \
         -w "${PROJECT_DIR}" \
         "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-        "${PROJECT_DIR}/build/sysrepo-mcp-server" --version
+        "${PROJECT_DIR}/build/sysrepo-mcp" --version
 
     log_info "All smoke tests passed."
 fi

@@ -1,7 +1,7 @@
 ################################################################################
 # SPDX-License-Identifier: LGPL-3.0-only
 #
-# This file is part of sysrepo-mcp-server.
+# This file is part of sysrepo-mcp.
 # Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
 
@@ -31,7 +31,7 @@ sphinxsrc  := $(TOPDIR)/sphinx
 ##############################################################################
 #
 # `make test` :
-#   1. builds the sysrepo-mcp-server binary,
+#   1. builds the sysrepo-mcp binary,
 #   2. smoke-checks the binary (--help / --version),
 #   3. runs the pytest suite in tests/ (if present).
 #

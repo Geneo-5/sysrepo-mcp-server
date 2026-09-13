@@ -10,16 +10,13 @@
 # =============================================================================
 
 config STRING
-        prompt "MCP endpoint URL path"
         default "/mcp"
 
 config INTEGER
-        prompt "Session timeout (seconds)"
         range 60 86400
         default 1800
 
 config INTEGER
-        prompt "Maximum concurrent sessions"
         range 1 1024
         default 64
 
@@ -42,17 +39,14 @@ config BOOL
 endchoice
 
 config STRING
-        prompt "Unix socket path"
         default "/var/run/sysrepo-mcp.sock"
         depends on UNIX_SOCKET
 
 config STRING
-        prompt "TCP listen address"
         default "127.0.0.1"
         depends on TCP
 
 config INTEGER
-        prompt "TCP listen port"
         range 1 65535
         default 8080
         depends on TCP
@@ -62,7 +56,6 @@ config INTEGER
 # =============================================================================
 
 config BOOL
-        prompt "Enable access control (authentication + NACM)"
         default y
 
 choice
@@ -80,24 +73,19 @@ config BOOL
 endchoice
 
 config STRING
-        prompt "Cookie name (COOKIE credential type only)"
         default "mcp_session"
         depends on COOKIE
 
 config STRING
-        prompt "API key file (one key per line)"
         default "/etc/sysrepo-mcp/keys"
 
 config STRING
-        prompt "Default NACM user (when key does not map to a user)"
         default "mcp"
 
 config STRING
-        prompt "NACM user list (user:groups, comma-separated)"
         default "mcp:operators"
 
 config BOOL
-        prompt "Deny unknown API keys (fail closed)"
         default y
 
 # =============================================================================
@@ -105,33 +93,26 @@ config BOOL
 # =============================================================================
 
 config BOOL
-        prompt "Read/Write mode (full access)"
         default n
         depends on ACL_ENABLED
 
 config BOOL
-        prompt "Read-Only mode (tools/list filtered, write tools hidden)"
         default y
         depends on ACL_ENABLED
 
 config BOOL
-        prompt "Expose YANG actions (RPC-style tools)"
         default y
 
 config BOOL
-        prompt "Expose raw NETCONF-style RPCs (sr_execute_rpc)"
         default n
 
 config BOOL
-        prompt "Expose subscription tools (oper/changes push)"
         default n
 
 config BOOL
-        prompt "Expose module install/uninstall tools"
         default n
 
 config STRING
-        prompt "Read-only modules (comma-separated)"
         default ""
 
 # =============================================================================
@@ -139,44 +120,31 @@ config STRING
 # =============================================================================
 
 config STRING
-        prompt "Sysrepo daemon socket path"
-        default "/var/run/sysrepo/sysrepod.sock"
+        default "/var/run/sysrepo-mcp.sock"
 
 config STRING
-        prompt "Sysrepo user (for authentication against sysrepod)"
         default "mcp"
 
-config STRING
-        prompt "Sysrepo password"
-        default ""
-
-config INTEGER
-        prompt "Sysrepo operation timeout (ms)"
-        range 100 60000
-        default 5000
+config BOOL
+        default y
 
 # =============================================================================
 # LOGGING (elog)
 # =============================================================================
 
 config BOOL
-        prompt "Log to syslog"
         default y
 
 config INTEGER
-        prompt "Log level (0=emerg .. 7=debug)"
         range 0 7
         default 6
 
 config BOOL
-        prompt "Log to console (stdout)"
         default n
 
 config STRING
-        prompt "Log file (when syslog is disabled)"
-        default "/var/log/sysrepo-mcp-server.log"
+        default "/var/log/sysrepo-mcp.log"
         depends on !LOG_TO_SYSLOG
 
 config BOOL
-        prompt "Enable daily log rotation"
         default y
