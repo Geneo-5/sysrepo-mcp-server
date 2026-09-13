@@ -50,6 +50,7 @@ RUN apt-get update && \
         m4 \
         pkg-config \
         kconfig-frontends \
+        python3-pip \
         # Download / archive tools (needed by some extern build systems)
         wget \
         curl \
@@ -72,6 +73,7 @@ RUN apt-get update && \
         libcurl4-openssl-dev \
         libhiredis-dev \
         libnghttp2-dev \
+        doxygen \
         # Configuration file parser (the project)
         libconfig-dev \
         # Python test runner
@@ -83,7 +85,22 @@ RUN apt-get update && \
         strace \
         gdb \
         valgrind \
-    && rm -rf /var/lib/apt/lists/*
+        texlive-latex-base \
+        texlive-latex-recommended \
+        texlive-fonts-recommended \
+        texlive-fonts-extra \
+        texlive-latex-extra \
+        tex-gyre \
+        latexmk \
+        texinfo \
+        texlive-fonts-general \
+        graphviz \
+    && rm -rf /var/lib/apt/lists/* && \
+    # Refresh TeX path database so that kpsewhich finds .sty in /usr/share/texmf
+    texhash 2>/dev/null || true && \
+    updmap-sys --syncwithtrees 2>/dev/null || true
+RUN pip install --break-system-packages kconfiglib
+RUN pip install --break-system-packages sphinx sphinx-rtd-theme breathe
 
 # ----------------------------------------------------------------------------
 # 2. Compile & install the external libraries from extern/
@@ -150,21 +167,30 @@ RUN --mount=type=bind,source=extern/fcgi2,target=/src/fcgi2,readonly \
     make -j$(nproc) && \
     make install
 
+ENV PKG_CONFIG_PATH=/usr/lib/pkgconfig
 # --- 2.5 stroll (data structures) --------------------------------------------
 RUN --mount=type=bind,source=extern/stroll,target=/src/stroll,readonly \
     cp -a /src/stroll /build/stroll-src && \
     cd /build/stroll-src && \
     make PREFIX=/usr BUILDDIR=/build/stroll defconfig && \
-    make PREFIX=/usr BUILDDIR=/build/stroll PREFIX=/usr/local -j$(nproc) && \
-    make PREFIX=/usr BUILDDIR=/build/stroll PREFIX=/usr/local install
+    make PREFIX=/usr BUILDDIR=/build/stroll -j$(nproc) && \
+    make PREFIX=/usr BUILDDIR=/build/stroll install
 
 # --- 2.6 utils (eTux utilities) ----------------------------------------------
 RUN --mount=type=bind,source=extern/utils,target=/src/utils,readonly \
     cp -a /src/utils /build/utils-src && \
     cd /build/utils-src && \
     make PREFIX=/usr BUILDDIR=/build/utils defconfig && \
-    make PREFIX=/usr BUILDDIR=/build/utils PREFIX=/usr/local -j$(nproc) && \
-    make PREFIX=/usr BUILDDIR=/build/utils PREFIX=/usr/local install
+    make PREFIX=/usr BUILDDIR=/build/utils -j$(nproc) && \
+    make PREFIX=/usr BUILDDIR=/build/utils install
+
+# --- 2.7 elog (syslog utilities) ----------------------------------------------
+RUN --mount=type=bind,source=extern/elog,target=/src/elog,readonly \
+    cp -a /src/elog /build/elog-src && \
+    cd /build/elog-src && \
+    make PREFIX=/usr BUILDDIR=/build/elog defconfig && \
+    make PREFIX=/usr BUILDDIR=/build/elog -j$(nproc) && \
+    make PREFIX=/usr BUILDDIR=/build/elog install
 
 # Refresh the dynamic linker cache for the freshly installed libraries.
 RUN ldconfig

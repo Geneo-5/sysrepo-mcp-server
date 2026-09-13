@@ -12,7 +12,49 @@
 #include <signal.h>
 #include <errno.h>
 
-#include <libconfig.h>
+#include "config.h"
+
+/* =========================================================================
+ * Compile-time defaults from config.in (Kconfig)
+ * ========================================================================= */
+
+/* Transport mode (UNIX_SOCKET or TCP) */
+#ifndef UNIX_SOCKET
+#  define UNIX_SOCKET_DEFAULT 0
+#else  /* UNIX_SOCKET */
+#  define UNIX_SOCKET_DEFAULT 1
+#endif /* UNIX_SOCKET */
+
+#ifndef TCP
+#  define TCP_DEFAULT 0
+#else  /* TCP */
+#  define TCP_DEFAULT 1
+#endif /* TCP */
+
+/* Default values from Kconfig */
+#define MCP_ENDPOINT_DEFAULT        "/mcp"
+#define MCP_SESSION_TTL_DEFAULT     1800
+#define MCP_MAX_SESSIONS_DEFAULT    64
+#define FCGI_SOCK_PATH_DEFAULT      "/var/run/sysrepo-mcp.sock"
+#define FCGI_HOST_DEFAULT           "127.0.0.1"
+#define FCGI_PORT_DEFAULT           8080
+#define ACL_ENABLED_DEFAULT         1
+#define ACL_API_KEY_BEARER_DEFAULT  1
+#define ACL_COOKIE_DEFAULT          0
+#define ACL_COOKIE_NAME_DEFAULT     "mcp_session"
+#define ACL_KEYS_FILE_DEFAULT       "/etc/sysrepo-mcp/keys"
+#define ACL_NACM_USER_DEFAULT       "mcp"
+#define ACL_NACM_USERS_DEFAULT      "mcp:operators"
+#define ACL_DENY_UNKNOWN_DEFAULT    1
+#define SR_SOCKET_DEFAULT           "/var/run/sysrepo/sysrepod.sock"
+#define SR_USERNAME_DEFAULT         "mcp"
+#define SR_PASSWORD_DEFAULT         ""
+#define SR_TIMEOUT_DEFAULT          5000
+#define LOG_SYSLOG_DEFAULT          1
+#define LOG_LEVEL_DEFAULT           6
+#define LOG_CONSOLE_DEFAULT         0
+#define LOG_FILE_DEFAULT            "/var/log/sysrepo-mcp-server.log"
+#define LOG_DAILY_ROTATE_DEFAULT    1
 
 #ifdef CONFIG_SYSREPO_MCP_SERVER_SYSLOG
 #include <syslog.h>
@@ -26,15 +68,33 @@
 #endif /* defined(CONFIG_SYSREPO_MCP_SERVER_VERBOSE) */
 
 /* =========================================================================
- * Configuration structure (parsed from libconfig file)
+ * Configuration structure (from config.in defaults + sysrepo runtime)
  * ========================================================================= */
 
 struct sysrepo_mcp_server_config {
         /* Server */
+        char *endpoint;
+        int   session_ttl;
+        int   max_sessions;
+
+        /* FastCGI transport */
+#if UNIX_SOCKET_DEFAULT
+        char *sock_path;
+#else  /* TCP */
         char *host;
         int   port;
-        char *transport;   /* "tcp" or "unix" */
-        char *socket_path; /* Unix socket path (if transport == "unix") */
+#endif /* UNIX_SOCKET */
+
+        /* Access control */
+#if ACL_ENABLED_DEFAULT
+        int   acl_enabled;
+        int   api_key_bearer;   /* 1 = bearer, 0 = cookie */
+        char *cookie_name;
+        char *keys_file;
+        char *nacm_user;
+        char *nacm_users;
+        int   deny_unknown;
+#endif /* ACL_ENABLED */
 
         /* Sysrepo connection */
         char *sr_socket_path;
@@ -42,20 +102,22 @@ struct sysrepo_mcp_server_config {
         char *sr_password;
         int   sr_connection_timeout;
 
-        /* Logging */
-        char *log_level;
-        int   use_syslog;
-        char *logfile;
-
-        /* Agent */
-        char *api_key;
-        char *agent_name;
-        char **allowed_modules;
-        int   allowed_modules_count;
+        /* Logging (elog defaults) */
+#if LOG_SYSLOG_DEFAULT
+        int   log_to_syslog;
+#endif /* LOG_SYSLOG */
+        int   log_level;
+#if LOG_CONSOLE_DEFAULT
+        int   log_to_console;
+#endif /* LOG_CONSOLE */
+        char *log_file;
+#if LOG_DAILY_ROTATE_DEFAULT
+        int   daily_rotate;
+#endif /* LOG_DAILY_ROTATE */
 };
 
 /* =========================================================================
- * Default configuration
+ * Initialize configuration with compile-time defaults
  * ========================================================================= */
 
 static struct sysrepo_mcp_server_config
@@ -65,167 +127,50 @@ sysrepo_mcp_server_config_defaults(void)
 
         memset(&config, 0, sizeof(config));
 
-        config.host      = strdup("0.0.0.0");
-        config.port      = 8000;
-        config.transport = strdup("tcp");
-        config.socket_path = NULL;
-        config.sr_socket_path = strdup("/var/run/sysrepo/sysrepod.sock");
-        config.sr_username = strdup("sysrepo-mcp");
-        config.sr_password = strdup("");
-        config.sr_connection_timeout = 5000;
-        config.log_level     = strdup("info");
-        config.use_syslog    = 1;
-        config.logfile       = strdup("/var/log/sysrepo-mcp-server.log");
-        config.api_key       = strdup("");
-        config.agent_name    = strdup("openhands-agent");
-        config.allowed_modules = NULL;
-        config.allowed_modules_count = 0;
+        /* Server */
+        config.endpoint       = strdup(MCP_ENDPOINT_DEFAULT);
+        config.session_ttl    = MCP_SESSION_TTL_DEFAULT;
+        config.max_sessions   = MCP_MAX_SESSIONS_DEFAULT;
+
+        /* FastCGI transport */
+#if UNIX_SOCKET_DEFAULT
+        config.sock_path = strdup(FCGI_SOCK_PATH_DEFAULT);
+#else  /* TCP */
+        config.host = strdup(FCGI_HOST_DEFAULT);
+        config.port = FCGI_PORT_DEFAULT;
+#endif /* UNIX_SOCKET */
+
+        /* Access control */
+#if ACL_ENABLED_DEFAULT
+        config.acl_enabled      = 1;
+        config.api_key_bearer   = ACL_API_KEY_BEARER_DEFAULT;
+        config.cookie_name      = strdup(ACL_COOKIE_NAME_DEFAULT);
+        config.keys_file        = strdup(ACL_KEYS_FILE_DEFAULT);
+        config.nacm_user        = strdup(ACL_NACM_USER_DEFAULT);
+        config.nacm_users       = strdup(ACL_NACM_USERS_DEFAULT);
+        config.deny_unknown     = ACL_DENY_UNKNOWN_DEFAULT;
+#endif /* ACL_ENABLED */
+
+        /* Sysrepo connection */
+        config.sr_socket_path     = strdup(SR_SOCKET_DEFAULT);
+        config.sr_username        = strdup(SR_USERNAME_DEFAULT);
+        config.sr_password        = strdup(SR_PASSWORD_DEFAULT);
+        config.sr_connection_timeout = SR_TIMEOUT_DEFAULT;
+
+        /* Logging (elog) */
+#if LOG_SYSLOG_DEFAULT
+        config.log_to_syslog = 1;
+#endif /* LOG_SYSLOG */
+        config.log_level = LOG_LEVEL_DEFAULT;
+#if LOG_CONSOLE_DEFAULT
+        config.log_to_console = 0;
+#endif /* LOG_CONSOLE */
+        config.log_file = strdup(LOG_FILE_DEFAULT);
+#if LOG_DAILY_ROTATE_DEFAULT
+        config.daily_rotate = 1;
+#endif /* LOG_DAILY_ROTATE */
 
         return config;
-}
-
-/* =========================================================================
- * Parse configuration file (libconfig)
- * ========================================================================= */
-
-static int
-sysrepo_mcp_server_parse_config(const char *config_path,
-                                struct sysrepo_mcp_server_config *config)
-{
-        config_t cfg;
-        config_value_t *value;
-        int err = 0;
-
-        config_init(&cfg);
-
-        if (!config_read_file(&cfg, config_path)) {
-                fprintf(stderr, "sysrepo-mcp-server: config error: %s "
-                               "[%d]: %s\n",
-                        config_error_file(&cfg),
-                        config_error_line(&cfg),
-                        config_error_text(&cfg));
-                err = 1;
-                goto out;
-        }
-
-        /* Server section */
-        {
-                const char *str;
-
-                if (config_lookup_string(&cfg, "server.host", &str) == CONFIG_TRUE) {
-                        free(config->host);
-                        config->host = strdup(str);
-                }
-                if (config_lookup_int(&cfg, "server.port", &config->port)
-                    != CONFIG_TRUE) {
-                        /* use default */
-                }
-                if (config_lookup_string(&cfg, "server.transport", &str)
-                    == CONFIG_TRUE) {
-                        free(config->transport);
-                        config->transport = strdup(str);
-
-                        /* If unix transport, read socket path */
-                        if (strcmp(config->transport, "unix") == 0) {
-                                if (config_lookup_string(&cfg,
-                                             "server.socket_path", &str)
-                                    == CONFIG_TRUE) {
-                                        free(config->socket_path);
-                                        config->socket_path = strdup(str);
-                                }
-                        }
-                }
-        }
-
-        /* Sysrepo section */
-        {
-                const char *str;
-
-                if (config_lookup_string(&cfg, "sysrepo.socket_path", &str)
-                    == CONFIG_TRUE) {
-                        free(config->sr_socket_path);
-                        config->sr_socket_path = strdup(str);
-                }
-                if (config_lookup_string(&cfg, "sysrepo.username", &str)
-                    == CONFIG_TRUE) {
-                        free(config->sr_username);
-                        config->sr_username = strdup(str);
-                }
-                if (config_lookup_string(&cfg, "sysrepo.password", &str)
-                    == CONFIG_TRUE) {
-                        free(config->sr_password);
-                        config->sr_password = strdup(str);
-                }
-                if (config_lookup_int(&cfg, "sysrepo.connection_timeout",
-                    &config->sr_connection_timeout) != CONFIG_TRUE) {
-                        /* use default */
-                }
-        }
-
-        /* Logging section */
-        {
-                const char *str;
-
-                if (config_lookup_string(&cfg, "logging.level", &str)
-                    == CONFIG_TRUE) {
-                        free(config->log_level);
-                        config->log_level = strdup(str);
-                }
-                if (config_lookup_bool(&cfg, "logging.use_syslog",
-                    &config->use_syslog) != CONFIG_TRUE) {
-                        /* use default */
-                }
-                if (config_lookup_string(&cfg, "logging.logfile", &str)
-                    == CONFIG_TRUE) {
-                        free(config->logfile);
-                        config->logfile = strdup(str);
-                }
-        }
-
-        /* Agent section */
-        {
-                const char *str;
-                config_list_t *list;
-                int count, i;
-
-                if (config_lookup_string(&cfg, "agent.api_key", &str)
-                    == CONFIG_TRUE) {
-                        free(config->api_key);
-                        config->api_key = strdup(str);
-                }
-                if (config_lookup_string(&cfg, "agent.name", &str)
-                    == CONFIG_TRUE) {
-                        free(config->agent_name);
-                        config->agent_name = strdup(str);
-                }
-
-                /* Parse allowed_modules list */
-                if (config_lookup_list(&cfg, "agent.allowed_modules", &list)
-                    == CONFIG_TRUE) {
-                        count = config_list_size(list);
-                        if (config->allowed_modules) {
-                                for (i = 0; i < config->allowed_modules_count; i++)
-                                        free(config->allowed_modules[i]);
-                                free(config->allowed_modules);
-                        }
-                        config->allowed_modules_count = count;
-                        if (count > 0) {
-                                config->allowed_modules =
-                                        calloc(count, sizeof(char *));
-                                for (i = 0; i < count; i++) {
-                                        value = config_list_get_elem(list, i);
-                                        if (value && value->type == CONFIG_TYPE_STRING) {
-                                                config->allowed_modules[i] =
-                                                        strdup(value->data.string);
-                                        }
-                                }
-                        }
-                }
-        }
-
-out:
-        config_destroy(&cfg);
-        return err;
 }
 
 /* =========================================================================
@@ -236,27 +181,35 @@ static void
 sysrepo_mcp_server_print_config(
         const struct sysrepo_mcp_server_config *config)
 {
-        int i;
+        printf("sysrepo-mcp-server configuration (compile-time defaults):\n");
+        printf("  endpoint          = %s\n", config->endpoint);
+        printf("  session_ttl       = %d\n", config->session_ttl);
+        printf("  max_sessions      = %d\n", config->max_sessions);
 
-        printf("sysrepo-mcp-server configuration:\n");
-        printf("  server.host       = %s\n", config->host);
-        printf("  server.port       = %d\n", config->port);
-        printf("  server.transport  = %s\n", config->transport);
-        if (config->socket_path)
-                printf("  server.socket_path = %s\n", config->socket_path);
-        printf("  sysrepo.socket_path  = %s\n", config->sr_socket_path);
-        printf("  sysrepo.username   = %s\n", config->sr_username);
-        printf("  sysrepo.timeout    = %d\n", config->sr_connection_timeout);
-        printf("  logging.level      = %s\n", config->log_level);
-        printf("  logging.use_syslog = %s\n", config->use_syslog ? "yes" : "no");
-        printf("  logging.logfile    = %s\n", config->logfile);
-        printf("  agent.api_key      = %s\n", config->api_key);
-        printf("  agent.name         = %s\n", config->agent_name);
-        printf("  agent.allowed_modules:");
-        for (i = 0; i < config->allowed_modules_count; i++) {
-                printf(" %s", config->allowed_modules[i]);
-        }
-        printf("\n");
+#if UNIX_SOCKET_DEFAULT
+        printf("  transport         = unix\n");
+        printf("  sock_path         = %s\n", config->sock_path);
+#else  /* TCP */
+        printf("  transport         = tcp\n");
+        printf("  host              = %s\n", config->host);
+        printf("  port              = %d\n", config->port);
+#endif /* UNIX_SOCKET */
+
+#if ACL_ENABLED_DEFAULT
+        printf("  acl_enabled       = %d\n", config->acl_enabled);
+        printf("  api_key_bearer    = %d\n", config->api_key_bearer);
+        printf("  cookie_name       = %s\n", config->cookie_name);
+        printf("  keys_file         = %s\n", config->keys_file);
+        printf("  nacm_user         = %s\n", config->nacm_user);
+        printf("  nacm_users        = %s\n", config->nacm_users);
+        printf("  deny_unknown      = %d\n", config->deny_unknown);
+#endif /* ACL_ENABLED */
+
+        printf("  sr_socket_path    = %s\n", config->sr_socket_path);
+        printf("  sr_username       = %s\n", config->sr_username);
+        printf("  sr_timeout        = %d\n", config->sr_connection_timeout);
+        printf("  log_level         = %d\n", config->log_level);
+        printf("  log_file          = %s\n", config->log_file);
 }
 
 /* =========================================================================
@@ -267,23 +220,23 @@ static void
 sysrepo_mcp_server_config_free(
         struct sysrepo_mcp_server_config *config)
 {
-        int i;
-
+        free(config->endpoint);
+#if UNIX_SOCKET_DEFAULT
+        free(config->sock_path);
+#else  /* TCP */
         free(config->host);
-        free(config->transport);
-        free(config->socket_path);
+#endif /* UNIX_SOCKET */
+
+#if ACL_ENABLED_DEFAULT
+        free(config->cookie_name);
+        free(config->keys_file);
+        free(config->nacm_user);
+        free(config->nacm_users);
+#endif /* ACL_ENABLED */
+
         free(config->sr_socket_path);
-        free(config->sr_username);
         free(config->sr_password);
-        free(config->log_level);
-        free(config->logfile);
-        free(config->api_key);
-        free(config->agent_name);
-        if (config->allowed_modules) {
-                for (i = 0; i < config->allowed_modules_count; i++)
-                        free(config->allowed_modules[i]);
-                free(config->allowed_modules);
-        }
+        free(config->log_file);
 }
 
 static volatile sig_atomic_t server_stopping = 0;
@@ -298,8 +251,6 @@ server_signal_handler(int signum)
 int
 main(int argc, char *argv[])
 {
-        int ret;
-        const char *config_path = NULL;
         struct sysrepo_mcp_server_config config;
 
         if (argc > 1 && strcmp(argv[1], "--help") == 0) {
@@ -307,7 +258,6 @@ main(int argc, char *argv[])
                 printf("Usage: sysrepo-mcp-server [options]\n");
                 printf("  --help        Show this help\n");
                 printf("  --version     Show version\n");
-                printf("  --config PATH Use this config file (libconfig format)\n");
                 return 0;
         }
 
@@ -316,47 +266,21 @@ main(int argc, char *argv[])
                 return 0;
         }
 
-        /* Parse config file path from arguments */
-        {
-                int i;
-                for (i = 1; i < argc; i++) {
-                        if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
-                                config_path = argv[i + 1];
-                                i++;
-                        }
-                }
-        }
-
-        ret = signal(SIGINT, server_signal_handler);
-        if (ret) {
+        /* Install signal handlers */
+        if (signal(SIGINT, server_signal_handler) == SIG_ERR) {
                 fprintf(stderr, "sysrepo-mcp-server: failed to install "
                                "SIGINT handler: %s\n", strerror(errno));
                 return 1;
         }
 
-        ret = signal(SIGTERM, server_signal_handler);
-        if (ret) {
+        if (signal(SIGTERM, server_signal_handler) == SIG_ERR) {
                 fprintf(stderr, "sysrepo-mcp-server: failed to install "
                                "SIGTERM handler: %s\n", strerror(errno));
                 return 1;
         }
 
-        /* Initialize default configuration */
+        /* Initialize configuration with compile-time defaults */
         config = sysrepo_mcp_server_config_defaults();
-
-        /* Parse configuration file (if provided) */
-        if (config_path) {
-                sysrepo_mcp_server_debug("Loading config file: %s", config_path);
-                ret = sysrepo_mcp_server_parse_config(config_path, &config);
-                if (ret) {
-                        fprintf(stderr, "sysrepo-mcp-server: failed to parse "
-                                       "configuration file '%s'\n", config_path);
-                        sysrepo_mcp_server_config_free(&config);
-                        return 1;
-                }
-        } else {
-                sysrepo_mcp_server_debug("No config file provided, using defaults");
-        }
 
         /* Print configuration (for validation / debug) */
         sysrepo_mcp_server_debug("Configuration loaded:");
@@ -365,7 +289,7 @@ main(int argc, char *argv[])
         /* TODO: Initialize sysrepo connection */
         sysrepo_mcp_server_debug("Initializing sysrepo connection");
 
-        /* TODO: Initialize MCP server */
+        /* TODO: Initialize MCP server (FastCGI listener) */
         sysrepo_mcp_server_debug("Initializing MCP server");
 
         /* TODO: Run event loop */

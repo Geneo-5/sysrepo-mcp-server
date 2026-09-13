@@ -35,55 +35,51 @@ contrôler le statut en temps réel.
 - **utils** / **stroll** : bibliothèques utilitaires eTux.
 - **ebuild** : système de construction Makefile.
 
-## Prérequis
+## Construction
 
-Pour utiliser l'environnement de build :
-
-- [Docker](https://www.docker.com/) (BuildKit est requis, activé par défaut
-  sur les versions récentes).
-
-Toutes les autres dépendances (compilateur, autotools, cmake, libconfig,
-python3, lighttpd, ...) sont installées par l'image Docker. Les sources des
-bibliothèques externes (`extern/`) sont téléchargées automatiquement.
-
-## Build
-
-Le build s'effectue depuis le dossier `docker/` :
+La construction se fait **sur un système où les dépendances sont déjà
+installées** (voir [Prérequis](#prérequis)). Le workflow standard est :
 
 ```sh
-# 1. Télécharge les sources extern/ (libyang, sysrepo, ebuild, stroll,
-#    utils, fcgi2) puis construit l'image Docker
-make -C docker build
-
-# 2. Vérification de zéro : nettoie extern/ et reconstruit tout sans cache
-make -C docker extern-clean
-make -C docker build-nc
+make config     # génère build/.config + build/config.h (Kconfig menuconfig)
+make            # compile le binaire build/sysrepo-mcp-server
+make install    # installe /usr/local/bin/sysrepo-mcp-server
 ```
 
-L'image `sysrepo-mcp-server:latest` est ensuite utilisée comme
-*environnement de build* : elle contient toutes les dépendances compilées
-(installées sous `/usr/local`), mais pas le projet lui-même. Le projet est
-compilé à l'exécution, sur le répertoire monté en lecture/écriture.
+`make config` ouvre l'interface `menuconfig` du système eBuild pour
+configurer le projet (adresse d'écoute, port, chemin du socket sysrepo,
+journalisation ...) ; les valeurs par défaut sont définies dans `config.in`.
+Il est aussi possible de générer une configuration sans interface
+interactive avec `make defconfig`.
 
-### Cibles disponibles
+### Prérequis
 
-| Cible | Description |
-|-------|------------|
-| `make -C docker extern`        | Télécharge les sources `extern/` (sans build). |
-| `make -C docker build`         | Télécharge `extern/` + build de l'image Docker (avec cache). |
-| `make -C docker build-nc`      | Idem, sans cache Docker. |
-| `make -C docker extern-clean`  | Supprime `extern/` (les sources seront retéléchargées). |
-| `make -C docker run`           | Ouvre un shell interactif dans le conteneur. |
-| `make -C docker test`          | Build de l'image, puis `make test` du projet dans le conteneur. |
+Le système de build doit fournir :
 
-### Scripts d'aide
+- eBuild (le système de construction — présent dans `extern/ebuild/` ou
+  `/usr/share/ebuild/`),
+- GCC (8+) ou Clang,
+- les bibliothèques, compilées et installées :
+  **libyang** (≥ 5.8), **sysrepo** (≥ 5.1), **fcgi2** (`libfcgi`),
+  **stroll**, **utils** (eTux), **libconfig**,
+- `pkg-config` et `kconfig-frontends` (pour `make config`).
 
-Les scripts du dossier `scripts/` s'exécutent *dans* l'image :
+Ces dépendances peuvent être obtenues deux façons :
 
-- `scripts/build.sh` : configure, compile et installe le projet
-  (`build/sysrepo-mcp-server`).
-- `scripts/test.sh` : lance `make test` (build + smoke test + suite pytest si
-  présente).
+1. **Compiler à la main** les sources de `extern/` sur le système hôte
+   (`make -C docker extern` télécharge les sources ; chaque bibliothèque a
+   sa commande de build respective) ;
+2. **Réutiliser l'image Docker de build** ([docker/](docker/README.md)) :
+   elle contient toutes les dépendances installées, et sert de
+   *système où les libs sont installées* pour CI et agents IA :
+
+   ```sh
+   make -C docker build    # télécharge extern/ + construit l'image
+   make -C docker run      # shell interactif : les libs sont toutes là
+   ```
+
+Pour CI et agents IA, le workflow complet (build, test, run) est décrit
+dans [docker/README.md](docker/README.md).
 
 ## Utilisation
 
@@ -123,13 +119,23 @@ server {
 };
 ```
 
+## Documentation
+
+La documentation HTML (guide d'installation, architecture du pont MCP ↔
+sysrepo, API) est générée avec Sphinx :
+
+```sh
+make doc         # génère doc/ (HTML)
+```
+
 ## Structure du projet
 
 ```
-├── docker/                 # Environnement de build (Docker)
-│   ├── Dockerfile          # Image de build (toutes les dépendances)
-│   ├── Makefile            # Cibles build / build-nc / run / test / extern
-│   └── config.cfg          # Exemple de configuration
+├── docker/                 # Environnement de build Docker (CI / agents IA)
+│   ├── Dockerfile          #   image de build (toutes les dépendances)
+│   ├── Makefile            #   cibles build / build-nc / run / test / extern
+│   ├── README.md           #   doc du workflow Docker
+│   └── config.cfg          #   exemple de configuration
 ├── extern/                 # Sources des dépendances (téléchargées, non versionnées)
 │   ├── ebuild/             #   système de build
 │   ├── utils/              #   utilitaires eTux
@@ -139,8 +145,7 @@ server {
 │   └── sysrepo/            #   datastore NETCONF
 ├── include/sysrepo/mcp/    # En-têtes publics
 ├── src/                    # Code source
-├── scripts/                # Scripts build / test (exécutés dans le conteneur)
-├── sphinx/                 # Documentation
+├── sphinx/                 # Sources de la documentation (Sphinx)
 ├── Makefile                # Point d'entrée du build (ebuild)
 └── ebuild.mk               # Déclaration du binaire
 ```

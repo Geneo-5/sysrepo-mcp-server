@@ -8,24 +8,50 @@
 srcdir := src
 srctop := $(TOPDIR)/$(srcdir)
 
-#
-# Binary declaration : the sysrepo-mcp-server executable.
-#
-# `bins` tells eBuild which executables to build and install, `*-objs`
-# lists the objects that are linked into the binary and `*-cflags` /
-# `*-ldflags` provide the compile and link flags.
-#
-# Note: eBuild's per-object include rules are limited to quoted include
-# directories (HEADERDIR / the source directory), so the project's public
-# include path is added explicitly via -I (see sysrepo-mcp-server-cflags).
-#
 bins                   += $(PACKAGE)
 $(PACKAGE)-objs        := $(srcdir)/main.o
-$(PACKAGE)-src         := $(srctop)
+main.o-src             := $(srctop)/main.c
 $(PACKAGE)-cflags      := -I$(TOPDIR)/include \
                           -DPACKAGE_NAME='"$(PACKAGE)"' \
-                          -DPACKAGE_VERSION='"$(VERSION)"' \
-                          -DCONFIG_SYSREPO_MCP_SERVER_SYSLOG
-$(PACKAGE)-ldflags     := -lconfig
+                          -DPACKAGE_VERSION='"$(VERSION)"'
+$(PACKAGE)-ldflags     :=
 
-include $(EBUILDDIR)/rules.mk
+
+################################################################################
+# Configuration files
+################################################################################
+
+config-in  := config.in
+doxyconf   := $(TOPDIR)/sphinx/Doxyfile
+sphinxsrc  := $(TOPDIR)/sphinx
+
+
+##############################################################################
+# Testing
+##############################################################################
+#
+# `make test` :
+#   1. builds the sysrepo-mcp-server binary,
+#   2. smoke-checks the binary (--help / --version),
+#   3. runs the pytest suite in tests/ (if present).
+#
+# Library paths point at the libraries installed by the container (see
+# docker/Dockerfile : installed under /usr/local).
+#
+PYTEST ?= python3 -m pytest
+TESTS  ?= tests
+
+.PHONY: test
+test: build
+	@echo "==> Smoke testing $(BUILDDIR)/$(PACKAGE) ..."
+	$(BUILDDIR)/$(PACKAGE) --help
+	$(BUILDDIR)/$(PACKAGE) --version
+	@if [ -d "$(TESTS)" ]; then \
+		echo "==> Running test suite ($(PYTEST)) ..."; \
+		PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$$PKG_CONFIG_PATH" \
+		LD_LIBRARY_PATH="/usr/local/lib:$$LD_LIBRARY_PATH" \
+		$(PYTEST) -v "$(TESTS)" || exit 1; \
+	else \
+		echo "==> No $(TESTS)/ directory found, nothing to test."; \
+	fi
+

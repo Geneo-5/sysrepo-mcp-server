@@ -7,42 +7,61 @@ Serveur MCP (Model Context Protocol) en C qui expose les fonctionnalités de
 de configurer un système via des données sysrepo et d'en contrôler le statut
 en temps réel.
 
+> **Note** : Ce projet est encore en phase de développement. La documentation
+> est un draft et peut être incomplète ou sujette à modification. Les APIs
+> et configurations ne sont pas figées.
+
 ## Objectifs
 
-- **Configuration**: Permettre à un agent IA de modifier la configuration du
+- **Configuration** : Permettre à un agent IA de modifier la configuration du
   système via l'API sysrepo (YANG models).
-- **Monitoring**: Exposer les status et événements du système (notifications
+- **Monitoring** : Exposer les status et événements du système (notifications
   sysrepo, états des interfaces, routes, etc.).
-- **Sécurité**: Assurer une authentification et autorisation appropriées pour
+- **Sécurité** : Assurer une authentification et autorisation appropriées pour
   les opérations de l'agent.
-- **Extensibilité**: Permettre l'ajout de nouveaux modules de configuration
+- **Extensibilité** : Permettre l'ajout de nouveaux modules de configuration
   et de monitoring.
 
 ## Architecture
 
 ```
-┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│   AI Agent  │◄────►│  MCP Server  │◄────►│   sysrepo   │
-│ (OpenHands  │      │  (C Library) │      │   Daemon    │
-│  SDK, etc.) │      └──────────────┘      └─────────────┘
-└─────────────┘                                │
-                                               ▼
-                                      ┌──────────────┐
-                                      │ YANG Models  │
-                                      │ (Configuration)│
-                                      └──────────────┘
++-------------+      +----------------------+      +-----------------+
+|   AI Agent  |<---->|  Reverse Proxy       |<---->|  sysrepo-mcp    |
+| (OpenHands  |      |  (lighttpd)          |      |  Server         |
+|  SDK, etc.) |      |                      |      |  (FastCGI)      |
++-------------+      +----------------------+      +--------+--------+
+                           |                               |
+                           |                               |
+                           +-------------------------------+
+                                                           |
+                                                           v
+                                                   +-----------------+
+                                                   |   Sysrepo       |
+                                                   |   Daemon        |
+                                                   |   (sysrepod)    |
+                                                   +--------+--------+
+                                                           |
+                                                           v
+                                                   +-----------------+
+                                                   |  YANG Models    |
+                                                   |  (Datastore)    |
+                                                   +-----------------+
 ```
 
-- **sysrepo**: Système de stockage de configuration basé sur les modèles YANG
-- **MCP Server**: Couche d'abstraction qui expose les opérations sysrepo via
+- **sysrepo** : Système de stockage de configuration basé sur les modèles YANG
+- **MCP Server** : Couche d'abstraction qui expose les opérations sysrepo via
   le protocole Model Context Protocol
-- **AI Agent**: Peut interagir avec le serveur pour lire/modifier la
+- **Reverse Proxy (lighttpd)** : Gère HTTP/HTTPS, TLS, et forward les requêtes
+  vers sysrepo-mcp-server via FastCGI
+- **AI Agent** : Peut interagir avec le serveur pour lire/modifier la
   configuration et recevoir des notifications
 
 ## Règles importantes
 
 - Le dossier `extern/` est un dossier de sources externes utilisé comme code de
   référence. **Il ne doit jamais être modifié.**
+- **Toute compilation doit se faire dans l'image Docker** via
+  `scripts/build-docker.sh`. Ne jamais compiler localement.
 
 ## Dépendances
 
@@ -54,11 +73,12 @@ comme sous-modules Git.
 | Librairie | Description | Usage dans le projet |
 |-----------|-------------|----------------------|
 | **ebuild** | Système de construction Makefile pour projets C | Système de build |
-| **utils** | Librairie utilitaire eTux | Fonctions communes (gestion de fichiers, sockets, événements, timers, etc.) |
+| **utils** | Librairie utilitaire eTux | Fonctions communes (fd, file, net, thread, timer, etc.) |
 | **stroll** | Librairie de structures de données | Listes, hash tables, heap, buffers, allocation, etc. |
 | **fcgi2** | FastCGI library | Serveur FastCGI pour exposer le MCP over FastCGI |
 | **libyang** | Bibliothèque de parsing YANG | Parsing et validation des schémas YANG |
 | **sysrepo** | Système de configuration NETCONF | API de configuration et monitoring YANG |
+| **elog** | Logging system | Gestion des logs (syslog, fichiers, rotation) |
 
 ### Emplacement
 
@@ -69,7 +89,8 @@ extern/
 ├── stroll/      # Data structures (lists, hashes, heaps, buffers)
 ├── fcgi2/       # FastCGI library
 ├── libyang/     # YANG schema parsing/validation
-└── sysrepo/     # sysrepo configuration datastore API
+├── sysrepo/     # sysrepo configuration datastore API
+└── elog/        # Logging system (syslog, file, rotation)
 ```
 
 ## Système de build
@@ -77,31 +98,62 @@ extern/
 Ce projet utilise le système de construction **ebuild**, un framework Makefile
 pour projets C. Ce système est standard dans l'écosystème eTux.
 
-### Construire le projet
+### Construire les sources (binaire)
+
+**Toute compilation doit passer par Docker :**
 
 ```bash
-# Configuration
-make configure
+# Compiler le binaire uniquement
+./scripts/build-docker.sh
 
-# Construction
-make
+# Rebuild forcé (télécharge les sources et reconstruit l'image Docker)
+./scripts/build-docker.sh --force
 
-# Installation (optionnel)
-sudo make install
-
-# Nettoyage
-make clean
+# Avec smoke tests
+./scripts/build-docker.sh --test
 ```
 
-### Règles ebuild
+### Construire la documentation
 
-Le système de build suit la structure standard d'ebuild :
+La génération de documentation est **stabilisée** : `scripts/build-docker.sh --doc`
+produit du HTML, du PDF et des pages de man sans erreur.
 
-- `Makefile` principal à la racine du projet
-- `src/` : code source C
-- `include/` : en-têtes publics
-- `tests/` : tests unitaires
-- `sphinx/` : documentation
+```bash
+# Compiler + documentation (HTML, PDF, info, man)
+./scripts/build-docker.sh --doc
+
+# Documentation HTML uniquement
+./scripts/build-docker.sh --doc-html
+
+# Documentation PDF uniquement
+./scripts/build-docker.sh --doc-pdf
+
+# Pages de man uniquement
+./scripts/build-docker.sh --doc-man
+```
+
+La documentation générée se trouve dans :
+
+- **HTML** : `build/doc/html/index.html`
+- **PDF** : `build/doc/pdf/sysrepo-mcp-server.pdf`
+- **Info** : `build/doc/info/sysrepo-mcp-server.info`
+- **Man** : `build/doc/man/`
+
+### Rebuild de l'image Docker
+
+**L'image Docker ne doit être reconstruite que si c'est vraiment nécessaire.**
+Les sources des dépendances (dossiers dans `extern/`) changent rarement.
+
+Pour forcer un rebuild complet (téléchargement des sources + reconstruction de l'image) :
+
+```bash
+./scripts/build-docker.sh --force
+```
+
+À éviter sauf si :
+- Les sous-modules `extern/` ont été mis à jour (`git submodule update`)
+- Le `Dockerfile` a été modifié
+- Une dépendance système a changé (paquets texlive, etc.)
 
 ## Structure du projet
 
@@ -113,64 +165,34 @@ sysrepo-mcp-server/
 │   ├── stroll/              # Data structures
 │   ├── fcgi2/               # FastCGI library
 │   ├── libyang/             # YANG parsing
-│   └── sysrepo/             # sysrepo API
+│   ├── sysrepo/             # sysrepo API
+│   └── elog/                # Logging system
 ├── src/                      # Code source du serveur
-│   ├── main.c               # Point d'entrée
-│   ├── mcp_server.c         # Implémentation du serveur MCP
-│   ├── sysrepo_bridge.c     # Pont vers sysrepo API
-│   └── ...
+│   └── main.c               # Point d'entrée
 ├── include/                  # En-têtes publics
-├── tests/                    # Tests unitaires
-├── models/                   # Modèles YANG utilisés
+├── sphinx/                   # Documentation Sphinx (sources RST)
+├── docker/                   # Dockerfile et Makefile pour le build Docker
+├── config.in                # Configuration Kconfig (valeurs par défaut)
+├── scripts/
+│   └── build-docker.sh      # Script de compilation dans Docker
 ├── Makefile                  # Configuration ebuild
+├── ebuild.mk                # Extension du système ebuild
 └── README.md                 # Documentation utilisateur
 ```
 
 ## Prérequis de construction
 
-- GCC (version 8+) ou Clang
-- pkg-config
-- Python 3 (pour certains scripts ebuild)
-- Documentation : make, man (optionnel)
+- Docker (avec le daemon en cours d'exécution)
+- GCC (version 8+) ou Clang (dans l'image Docker)
+- pkg-config (dans l'image Docker)
 
 Les dépendances sont fournies dans `extern/` et n'ont pas besoin d'être
 installées séparément.
 
-## Construction et installation
-
-Le projet utilise un Makefile ebuild. Voir le README.md à la racine du
-dossier `extern/ebuild/` pour les détails du système de build.
-
-```bash
-# Configuration (optionnelle, détecte les dépendances)
-make configure
-
-# Construction
-make
-
-# Installation (optionnel)
-sudo make install
-
-# Nettoyage
-make clean
-```
-
-## Fonctionnalités prévues
-
-1. **Lecture de configuration**: Récupérer la configuration courante d'un
-   modèle YANG.
-2. **Écriture de configuration**: Appliquer des modifications de
-   configuration.
-3. **Notifications en temps réel**: Recevoir et transmettre les notifications
-   sysrepo (events, erreurs, changements d'état).
-4. **Gestion des sessions**: Gérer les sessions sysrepo depuis l'agent IA.
-5. **Authentification**: Vérifier les permissions de l'agent avant
-   d'exécuter des opérations sensibles.
-
 ## Utilisation
 
 ```bash
-./sysrepo-mcp-server [--config /path/to/config.json]
+./sysrepo-mcp-server [--help] [--version]
 ```
 
 Le serveur démarrera et exécutera le protocole MCP sur une socket Unix ou TCP
