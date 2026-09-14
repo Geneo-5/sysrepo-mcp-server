@@ -58,3 +58,4 @@ dkms.conf
 
 # Documentation build artifacts
 sphinx/_doxygen/
+__pycache__/
