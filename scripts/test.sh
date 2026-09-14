@@ -40,7 +40,31 @@ if ! docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Run `make test` inside the image
+# 2. Start sysrepo-mcp and lighttpd (FastCGI proxy)
+# ---------------------------------------------------------------------------
+echo "Starting sysrepo-mcp and lighttpd..."
+
+# Start sysrepo-mcp in background (listens on Unix socket)
+docker run -d --name sysrepo-mcp-test-server \
+    -u "$(id -u):$(id -g)" \
+    -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
+    -w "${PROJECT_ROOT}" \
+    "${IMAGE_TAG}:${DOCKER_TAG}" \
+    /usr/local/bin/sysrepo-mcp > /dev/null 2>&1 || true
+
+# Start lighttpd with FastCGI proxy
+docker run -d --name sysrepo-mcp-test-proxy \
+    -u "$(id -u):$(id -g)" \
+    -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
+    -w "${PROJECT_ROOT}" \
+    "${IMAGE_TAG}:${DOCKER_TAG}" \
+    lighttpd -f /etc/lighttpd/lighttpd.conf > /dev/null 2>&1 || true
+
+# Wait for servers to be ready
+sleep 2
+
+# ---------------------------------------------------------------------------
+# 3. Run `make test` inside the image
 # ---------------------------------------------------------------------------
 cd "$PROJECT_ROOT"
 
@@ -50,7 +74,7 @@ if [ $# -gt 0 ]; then
         -u "$(id -u):$(id -g)" \
         -v "${PROJECT_ROOT}:/workspace" \
         -w /workspace \
-        "$IMAGE_TAG" \
+        "${IMAGE_TAG}:${DOCKER_TAG}" \
         make test "$@"
 else
     echo "Running: make test (in container)"
@@ -58,6 +82,17 @@ else
         -u "$(id -u):$(id -g)" \
         -v "${PROJECT_ROOT}:/workspace" \
         -w /workspace \
-        "$IMAGE_TAG" \
+        "${IMAGE_TAG}:${DOCKER_TAG}" \
         make test
 fi
+
+# ---------------------------------------------------------------------------
+# 4. Cleanup: stop test servers
+# ---------------------------------------------------------------------------
+echo "Stopping test servers..."
+docker stop sysrepo-mcp-test-server >/dev/null 2>&1 || true
+docker stop sysrepo-mcp-test-proxy >/dev/null 2>&1 || true
+docker rm sysrepo-mcp-test-server >/dev/null 2>&1 || true
+docker rm sysrepo-mcp-test-proxy >/dev/null 2>&1 || true
+
+echo "Test complete."

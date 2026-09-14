@@ -32,8 +32,11 @@ sphinxsrc  := $(TOPDIR)/sphinx
 #
 # `make test` :
 #   1. builds the sysrepo-mcp binary,
-#   2. smoke-checks the binary (--help / --version),
-#   3. runs the pytest suite in tests/ (if present).
+#   2. runs the pytest suite in tests/ (if present).
+#
+# The test suite communicates with the server through the FastCGI socket.
+# The binary is NOT called directly (--help/--version) because
+# `fcgi_stdio.h` intercepts stdout/stderr at link time.
 #
 # Library paths point at the libraries installed by the container (see
 # docker/Dockerfile : installed under /usr/local).
@@ -43,9 +46,6 @@ TESTS  ?= tests
 
 .PHONY: test
 test: build
-	@echo "==> Smoke testing $(BUILDDIR)/$(PACKAGE) ..."
-	$(BUILDDIR)/$(PACKAGE) --help
-	$(BUILDDIR)/$(PACKAGE) --version
 	@if [ -d "$(TESTS)" ]; then \
 		echo "==> Running test suite ($(PYTEST)) ..."; \
 		PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$$PKG_CONFIG_PATH" \
