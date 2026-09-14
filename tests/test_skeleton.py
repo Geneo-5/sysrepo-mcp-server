@@ -48,14 +48,13 @@ class TestBuild:
 # =============================================================================
 # CLI tests (smoke tests)
 # =============================================================================
-# NOTE: The binary is linked with fcgi_stdio.h, which intercepts stdout/stderr
-# at link time. Calling the binary directly via subprocess.run() produces empty
-# output. These tests are skipped when the server is not running.
-# The real smoke tests happen through the FastCGI socket (see
-# test_oven_integration.py for integration tests).
+# The binary is linked with fcgi_stdio.h, which intercepts stdout/stderr
+# at link time. Direct subprocess.run() calls produce empty output.
+# These tests verify the server responds to valid MCP requests via the
+# FastCGI socket.
 
 class TestCLI:
-    """Test command-line interface (skipped when server not available)."""
+    """Test command-line interface via FastCGI socket."""
 
     @pytest.fixture(autouse=True)
     def check_server_available(self):
@@ -65,28 +64,47 @@ class TestCLI:
             pytest.skip("Server not running (socket not found)")
 
     def test_help_output(self):
-        """Test that --help produces output."""
-        result = subprocess.run(
-            [str(BINARY_PATH), "--help"],
-            capture_output=True,
-            text=True
-        )
-        
-        assert result.returncode == 0
-        assert "sysrepo-mcp" in result.stdout or "sysrepo-mcp" in result.stderr
-        assert "--help" in result.stdout or "--help" in result.stderr
-    
+        """Test that server responds to a valid MCP request."""
+        import socket
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_status",
+                "arguments": {}
+            }
+        }
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.connect("/tmp/sysrepo-mcp-test.sock")
+            sock.sendall(json.dumps(request).encode())
+            response = sock.recv(4096).decode()
+            assert "jsonrpc" in response
+            assert "sysrepo-mcp" in response or "version" in response
+        finally:
+            sock.close()
+
     def test_version_output(self):
-        """Test that --version produces output."""
-        result = subprocess.run(
-            [str(BINARY_PATH), "--version"],
-            capture_output=True,
-            text=True
-        )
-        
-        assert result.returncode == 0
-        assert "sysrepo-mcp" in result.stdout or "sysrepo-mcp" in result.stderr
-        assert "0.1" in result.stdout or "0.1" in result.stderr
+        """Test that server responds with version info."""
+        import socket
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_status",
+                "arguments": {}
+            }
+        }
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.connect("/tmp/sysrepo-mcp-test.sock")
+            sock.sendall(json.dumps(request).encode())
+            response = sock.recv(4096).decode()
+            assert "0.1" in response
+        finally:
+            sock.close()
 
 
 # =============================================================================

@@ -40,59 +40,40 @@ if ! docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Start sysrepo-mcp and lighttpd (FastCGI proxy)
+# 2. Start sysrepo-mcp + lighttpd in a single container
 # ---------------------------------------------------------------------------
-echo "Starting sysrepo-mcp and lighttpd..."
+echo "Starting test container with sysrepo-mcp + lighttpd..."
 
-# Start sysrepo-mcp in background (listens on Unix socket)
-docker run -d --name sysrepo-mcp-test-server \
+# Start a single container running both sysrepo-mcp and lighttpd in background,
+# then exec bash. The container stays alive until explicitly stopped.
+docker run -d --name sysrepo-mcp-test \
     -u "$(id -u):$(id -g)" \
     -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
     -w "${PROJECT_ROOT}" \
     "${IMAGE_TAG}:${DOCKER_TAG}" \
-    /usr/local/bin/sysrepo-mcp > /dev/null 2>&1 || true
-
-# Start lighttpd with FastCGI proxy
-docker run -d --name sysrepo-mcp-test-proxy \
-    -u "$(id -u):$(id -g)" \
-    -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
-    -w "${PROJECT_ROOT}" \
-    "${IMAGE_TAG}:${DOCKER_TAG}" \
-    lighttpd -f /etc/lighttpd/lighttpd.conf > /dev/null 2>&1 || true
+    bash -c "sysrepo-mcp > /dev/null 2>&1 & lighttpd -f /etc/lighttpd/lighttpd.conf > /dev/null 2>&1 & sleep 2 && exec bash"
 
 # Wait for servers to be ready
 sleep 2
 
 # ---------------------------------------------------------------------------
-# 3. Run `make test` inside the image
+# 3. Run `make test` inside the same container
 # ---------------------------------------------------------------------------
 cd "$PROJECT_ROOT"
 
 if [ $# -gt 0 ]; then
     echo "Running: make test $* (in container)"
-    docker run --rm \
-        -u "$(id -u):$(id -g)" \
-        -v "${PROJECT_ROOT}:/workspace" \
-        -w /workspace \
-        "${IMAGE_TAG}:${DOCKER_TAG}" \
-        make test "$@"
+    docker exec sysrepo-mcp-test make test "$@"
 else
     echo "Running: make test (in container)"
-    docker run --rm \
-        -u "$(id -u):$(id -g)" \
-        -v "${PROJECT_ROOT}:/workspace" \
-        -w /workspace \
-        "${IMAGE_TAG}:${DOCKER_TAG}" \
-        make test
+    docker exec sysrepo-mcp-test make test
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Cleanup: stop test servers
+# 4. Cleanup: stop test container
 # ---------------------------------------------------------------------------
-echo "Stopping test servers..."
-docker stop sysrepo-mcp-test-server >/dev/null 2>&1 || true
-docker stop sysrepo-mcp-test-proxy >/dev/null 2>&1 || true
-docker rm sysrepo-mcp-test-server >/dev/null 2>&1 || true
-docker rm sysrepo-mcp-test-proxy >/dev/null 2>&1 || true
+echo "Stopping test container..."
+docker stop sysrepo-mcp-test >/dev/null 2>&1 || true
+docker rm sysrepo-mcp-test >/dev/null 2>&1 || true
 
 echo "Test complete."

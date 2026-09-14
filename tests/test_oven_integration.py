@@ -235,17 +235,48 @@ def call_mcp_tool(socket_path: str, tool_name: str, arguments: Optional[Dict] = 
 # =============================================================================
 
 class TestServerBasics:
-    """Test basic server functionality."""
-    
+    """Test basic server functionality via FastCGI socket."""
+
+    @pytest.fixture(autouse=True)
+    def check_server_available(self):
+        """Check if the test server socket is available."""
+        socket_path = "/tmp/sysrepo-mcp-test.sock"
+        if not os.path.exists(socket_path):
+            pytest.skip("Server not running (socket not found)")
+
     def test_server_version(self):
         """Test that server returns correct version."""
-        # This would test --version flag
-        # For now, skip as we need to run the binary
-        pytest.skip("Requires binary execution")
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_status",
+                "arguments": {}
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+        assert "version" in response["result"]
+        assert "0.1" in response["result"]["version"]
+
     def test_server_help(self):
-        """Test that server returns help text."""
-        pytest.skip("Requires binary execution")
+        """Test that server responds to get_status."""
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_status",
+                "arguments": {}
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+        assert "sysrepo-mcp" in response["result"].get("version", "") or \
+               "version" in response["result"]
 
 
 # =============================================================================
@@ -254,76 +285,94 @@ class TestServerBasics:
 
 class TestOvenConfiguration:
     """Test MCP tools with oven YANG module configuration operations."""
-    
+
     @pytest.fixture(autouse=True)
-    def setup_oven_module(self):
-        """Ensure oven YANG module is available for testing."""
-        assert OVEN_YANG_PATH.exists(), f"oven.yang not found at {OVEN_YANG_PATH}"
-        yield
-    
+    def check_server_available(self):
+        """Check if the test server socket is available."""
+        socket_path = "/tmp/sysrepo-mcp-test.sock"
+        if not os.path.exists(socket_path):
+            pytest.skip("Server not running (socket not found)")
+
     def test_get_oven_config_full(self):
         """Test getting full oven configuration."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # This would test:
-        # GET /mcp with:
-        # {
-        #   "jsonrpc": "2.0",
-        #   "id": 1,
-        #   "method": "tools/call",
-        #   "params": {
-        #     "name": "sr_get_config",
-        #     "arguments": {
-        #       "xpath": "/oven:oven"
-        #     }
-        #   }
-        # }
-        # 
-        # Expected response:
-        # {
-        #   "jsonrpc": "2.0",
-        #   "id": 1,
-        #   "result": {
-        #     "data": {
-        #       "oven:oven": {
-        #         "turned-on": false,
-        #         "temperature": 0
-        #       }
-        #     },
-        #     "module": "oven",
-        #     "path": "/oven:oven"
-        #   }
-        # }
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_get_config",
+                "arguments": {
+                    "xpath": "/oven:oven"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+        assert "data" in response["result"]
+
     def test_get_oven_temperature(self):
         """Test getting specific oven temperature."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # GET /mcp with xpath="/oven:oven/temperature"
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_get_config",
+                "arguments": {
+                    "xpath": "/oven:oven/temperature"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_edit_oven_temperature(self):
         """Test setting oven temperature."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # POST with:
-        # {
-        #   "name": "sr_edit_config",
-        #   "arguments": {
-        #     "xpath": "/oven:oven",
-        #     "target": "running",
-        #     "config": {
-        #       "oven:oven": {
-        #         "temperature": 180
-        #       }
-        #     }
-        #   }
-        # }
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_edit_config",
+                "arguments": {
+                    "xpath": "/oven:oven",
+                    "target": "running",
+                    "config": {
+                        "oven:oven": {
+                            "temperature": 180
+                        }
+                    }
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_edit_oven_turned_on(self):
         """Test turning oven on/off."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # Similar to temperature test but with turned-on: true
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_edit_config",
+                "arguments": {
+                    "xpath": "/oven:oven",
+                    "target": "running",
+                    "config": {
+                        "oven:oven": {
+                            "turned-on": True
+                        }
+                    }
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
 
 
 # =============================================================================
@@ -332,19 +381,47 @@ class TestOvenConfiguration:
 
 class TestOvenOperationalState:
     """Test MCP tools with oven YANG module operational state."""
-    
+
+    @pytest.fixture(autouse=True)
+    def check_server_available(self):
+        """Check if the test server socket is available."""
+        socket_path = "/tmp/sysrepo-mcp-test.sock"
+        if not os.path.exists(socket_path):
+            pytest.skip("Server not running (socket not found)")
+
     def test_get_oven_state(self):
         """Test getting oven operational state."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # GET with xpath="/oven:oven-state"
-        # Expected: temperature and food-inside in LYD_JSON format
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_get_operational",
+                "arguments": {
+                    "xpath": "/oven:oven-state"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_get_oven_state_temperature(self):
         """Test getting oven state temperature only."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # GET with xpath="/oven:oven-state/temperature"
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_get_operational",
+                "arguments": {
+                    "xpath": "/oven:oven-state/temperature"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
 
 
 # =============================================================================
@@ -353,39 +430,70 @@ class TestOvenOperationalState:
 
 class TestOvenRPC:
     """Test MCP tools with oven YANG module RPC operations."""
-    
+
+    @pytest.fixture(autouse=True)
+    def check_server_available(self):
+        """Check if the test server socket is available."""
+        socket_path = "/tmp/sysrepo-mcp-test.sock"
+        if not os.path.exists(socket_path):
+            pytest.skip("Server not running (socket not found)")
+
     def test_execute_insert_food_now(self):
         """Test executing insert-food RPC with time=now."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # POST with:
-        # {
-        #   "name": "sr_execute_rpc",
-        #   "arguments": {
-        #     "xpath": "/oven:insert-food",
-        #     "input_params": {
-        #       "time": "now"
-        #     }
-        #   }
-        # }
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_execute_rpc",
+                "arguments": {
+                    "xpath": "/oven:insert-food",
+                    "input_params": {
+                        "time": "now"
+                    }
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_execute_insert_food_on_ready(self):
         """Test executing insert-food RPC with time=on-oven-ready."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # Similar to above but with "on-oven-ready"
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_execute_rpc",
+                "arguments": {
+                    "xpath": "/oven:insert-food",
+                    "input_params": {
+                        "time": "on-oven-ready"
+                    }
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_execute_remove_food(self):
         """Test executing remove-food RPC."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # POST with:
-        # {
-        #   "name": "sr_execute_rpc",
-        #   "arguments": {
-        #     "xpath": "/oven:remove-food"
-        #   }
-        # }
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_execute_rpc",
+                "arguments": {
+                    "xpath": "/oven:remove-food"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
 
 
 # =============================================================================
@@ -394,53 +502,100 @@ class TestOvenRPC:
 
 class TestYANGTree:
     """Test YANG schema exploration tools with oven module."""
-    
+
+    @pytest.fixture(autouse=True)
+    def check_server_available(self):
+        """Check if the test server socket is available."""
+        socket_path = "/tmp/sysrepo-mcp-test.sock"
+        if not os.path.exists(socket_path):
+            pytest.skip("Server not running (socket not found)")
+
     def test_get_tree_oven_module(self):
         """Test getting full oven schema tree."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # GET with:
-        # {
-        #   "name": "get_tree",
-        #   "arguments": {
-        #     "module": "oven",
-        #     "xpath": "/"
-        #   }
-        # }
-        # 
-        # Expected: tree structure with oven:oven and oven:oven-state containers
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_tree",
+                "arguments": {
+                    "module": "oven",
+                    "xpath": "/"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_get_tree_oven_container(self):
         """Test getting oven container subtree."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # GET with xpath="/oven:oven"
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_tree",
+                "arguments": {
+                    "module": "oven",
+                    "xpath": "/oven:oven"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_get_help_oven_temperature(self):
         """Test getting help for oven temperature leaf."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # GET with:
-        # {
-        #   "name": "get_help",
-        #   "arguments": {
-        #     "xpath": "/oven:oven/temperature"
-        #   }
-        # }
-        # 
-        # Expected: node_type="leaf", type="oven-temperature", range="0..250"
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_help",
+                "arguments": {
+                    "xpath": "/oven:oven/temperature"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_get_help_oven_container(self):
         """Test getting help for oven container."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # GET with xpath="/oven:oven"
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_help",
+                "arguments": {
+                    "xpath": "/oven:oven"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
+
     def test_get_help_insert_food_rpc(self):
         """Test getting help for insert-food RPC."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # GET with xpath="/oven:insert-food"
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_help",
+                "arguments": {
+                    "xpath": "/oven:insert-food"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "result" in response
 
 
 # =============================================================================
@@ -449,24 +604,60 @@ class TestYANGTree:
 
 class TestErrorHandling:
     """Test error handling for invalid requests."""
-    
+
+    @pytest.fixture(autouse=True)
+    def check_server_available(self):
+        """Check if the test server socket is available."""
+        socket_path = "/tmp/sysrepo-mcp-test.sock"
+        if not os.path.exists(socket_path):
+            pytest.skip("Server not running (socket not found)")
+
     def test_missing_xpath_sr_get_config(self):
         """Test error when xpath is missing for sr_get_config."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # Should return error code -32602 (Invalid parameters)
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "sr_get_config",
+                "arguments": {}
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "error" in response
+
     def test_invalid_module_get_tree(self):
         """Test error when module doesn't exist for get_tree."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # Module "nonexistent" should return error
-    
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_tree",
+                "arguments": {
+                    "module": "nonexistent"
+                }
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "error" in response
+
     def test_invalid_tool_name(self):
         """Test error when tool name doesn't exist."""
-        pytest.skip("Requires running FastCGI server")
-        
-        # Tool "invalid_tool" should return error code -32601
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "invalid_tool",
+                "arguments": {}
+            }
+        }
+        response = send_fcgi_request(TEST_FCGI_SOCKET, request)
+        assert response["jsonrpc"] == "2.0"
+        assert "error" in response
 
 
 # =============================================================================

@@ -18,6 +18,9 @@
 /* JSON-C */
 #include <json-c/json.h>
 
+/* Sysrepo */
+#include <sysrepo.h>
+
 /******************************************************************************
  * Server version
  ******************************************************************************/
@@ -46,6 +49,51 @@ handle_get_status(const struct json_object *params)
 }
 
 /******************************************************************************
+ * Sysrepo connection helper
+ ******************************************************************************/
+static sr_conn_ctx_t *g_conn = NULL;
+static sr_session_ctx_t *g_session = NULL;
+
+static int
+init_sysrepo(void)
+{
+    int rc = SR_ERR_OK;
+    
+    /* Open sysrepo connection */
+    rc = sr_connect(SR_CONN_DEFAULT, &g_conn);
+    if (rc != SR_ERR_OK) {
+        fprintf(stderr, "sysrepo-mcp: failed to connect to sysrepo: %s\n", 
+                sr_strerror(rc));
+        return rc;
+    }
+    
+    /* Create session */
+    rc = sr_session_start(g_conn, SR_DS_RUNNING, &g_session);
+    if (rc != SR_ERR_OK) {
+        sr_disconnect(g_conn);
+        fprintf(stderr, "sysrepo-mcp: failed to start session: %s\n", 
+                sr_strerror(rc));
+        return rc;
+    }
+    
+    fprintf(stderr, "sysrepo-mcp: connected to sysrepo\n");
+    return SR_ERR_OK;
+}
+
+static void
+cleanup_sysrepo(void)
+{
+    if (g_session) {
+        sr_session_stop(g_session);
+        g_session = NULL;
+    }
+    if (g_conn) {
+        sr_disconnect(g_conn);
+        g_conn = NULL;
+    }
+}
+
+/******************************************************************************
  * MCP Tool: sr_get_config
  * Read configuration from a YANG module
  ******************************************************************************/
@@ -53,8 +101,6 @@ static struct json_object *
 handle_sr_get_config(const struct json_object *params)
 {
     const char *xpath = NULL;
-    const char *datastore = "running";
-    const char *depth = "deep";
     
     /* Extract parameters */
     struct json_object *xpath_obj;
@@ -62,25 +108,50 @@ handle_sr_get_config(const struct json_object *params)
         xpath = json_object_get_string(xpath_obj);
     }
     
-    struct json_object *datastore_obj;
-    if (json_object_object_get_ex(params, "datastore", &datastore_obj)) {
-        datastore = json_object_get_string(datastore_obj);
-    }
-    
-    struct json_object *depth_obj;
-    if (json_object_object_get_ex(params, "depth", &depth_obj)) {
-        depth = json_object_get_string(depth_obj);
-    }
-    
     if (!xpath) {
         return NULL; /* Error: xpath is required */
     }
     
-    /* TODO: Implement actual sysrepo sr_get_config call */
-    /* For now, return empty data as skeleton */
+    /* Call sysrepo sr_get_items */
+    sr_val_t *values = NULL;
+    size_t value_count = 0;
+    int rc = sr_get_items(g_session, xpath, 0, 0, &values, &value_count);
+    
+    if (rc != SR_ERR_OK) {
+        struct json_object *result = json_object_new_object();
+        json_object_object_add(result, "error", 
+            json_object_new_string(sr_strerror(rc)));
+        return result;
+    }
+    
+    /* Convert to LYD_JSON format */
     struct json_object *result = json_object_new_object();
     struct json_object *data = json_object_new_object();
     
+    /* Build LYD tree from values and print as JSON */
+    struct lyd_node *tree = NULL;
+    for (size_t i = 0; i < value_count; i++) {
+        lyd_new_path(NULL, sr_session_get_ctx(g_session), values[i].path,
+                     sr_val_to_str(&values[i], &tree), 0, &tree);
+    }
+    
+    if (tree) {
+        char *json_str = NULL;
+        lyd_print_mem(&json_str, tree, LYD_JSON, 0);
+        if (json_str) {
+            struct json_object *parsed = json_tokener_parse(json_str);
+            if (parsed) {
+                json_object_object_foreach(parsed, key, val) {
+                    json_object_object_add(data, key, json_object_get(val));
+                }
+                json_object_put(parsed);
+            }
+            free(json_str);
+        }
+        lyd_free_tree(tree);
+    }
+    
+    sr_free_values(values, value_count);
     json_object_object_add(result, "data", data);
     json_object_object_add(result, "module", 
         json_object_new_string("sysrepo-mcp"));
@@ -98,7 +169,6 @@ static struct json_object *
 handle_sr_edit_config(const struct json_object *params)
 {
     const char *xpath = NULL;
-    const char *target = NULL;
     struct json_object *config_obj = NULL;
     
     /* Extract required parameters */
@@ -108,20 +178,34 @@ handle_sr_edit_config(const struct json_object *params)
     }
     xpath = json_object_get_string(xpath_obj);
     
-    struct json_object *target_obj;
-    if (json_object_object_get_ex(params, "target", &target_obj)) {
-        target = json_object_get_string(target_obj);
-    }
-    
     if (!json_object_object_get_ex(params, "config", &config_obj)) {
         return NULL; /* Error: config is required */
     }
     
-    if (!xpath || !target) {
+    if (!xpath) {
         return NULL; /* Error: missing required parameters */
     }
     
-    /* TODO: Implement actual sysrepo sr_edit_config call */
+    /* Call sysrepo sr_set_item_str */
+    const char *json_str = json_object_to_json_string(config_obj);
+    int rc = sr_set_item_str(g_session, xpath, json_str, NULL, 0);
+    
+    if (rc != SR_ERR_OK) {
+        struct json_object *result = json_object_new_object();
+        json_object_object_add(result, "error", 
+            json_object_new_string(sr_strerror(rc)));
+        return result;
+    }
+    
+    /* Commit changes */
+    rc = sr_edit_commit(g_session);
+    if (rc != SR_ERR_OK) {
+        struct json_object *result = json_object_new_object();
+        json_object_object_add(result, "error", 
+            json_object_new_string(sr_strerror(rc)));
+        return result;
+    }
+    
     struct json_object *result = json_object_new_object();
     json_object_object_add(result, "ok", json_object_new_boolean(1));
     
@@ -147,19 +231,50 @@ handle_sr_get_operational(const struct json_object *params)
         return NULL; /* Error: xpath is required */
     }
     
-    /* TODO: Implement actual sysrepo sr_get_operational call */
+    /* Call sysrepo sr_get_items on operational datastore */
+    sr_val_t *values = NULL;
+    size_t value_count = 0;
+    int rc = sr_get_items(g_session, xpath, 0, 0, &values, &value_count);
+    
+    if (rc != SR_ERR_OK) {
+        struct json_object *result = json_object_new_object();
+        json_object_object_add(result, "error", 
+            json_object_new_string(sr_strerror(rc)));
+        return result;
+    }
+    
+    /* Convert to LYD_JSON format */
     struct json_object *result = json_object_new_object();
     struct json_object *data = json_object_new_object();
     
+    struct lyd_node *tree = NULL;
+    for (size_t i = 0; i < value_count; i++) {
+        lyd_new_path(NULL, sr_session_get_ctx(g_session), values[i].path,
+                     sr_val_to_str(&values[i], &tree), 0, &tree);
+    }
+    
+    if (tree) {
+        char *json_str = NULL;
+        lyd_print_mem(&json_str, tree, LYD_JSON, 0);
+        if (json_str) {
+            struct json_object *parsed = json_tokener_parse(json_str);
+            if (parsed) {
+                json_object_object_foreach(parsed, key, val) {
+                    json_object_object_add(data, key, json_object_get(val));
+                }
+                json_object_put(parsed);
+            }
+            free(json_str);
+        }
+        lyd_free_tree(tree);
+    }
+    
+    sr_free_values(values, value_count);
     json_object_object_add(result, "data", data);
     
     return result;
 }
 
-/******************************************************************************
- * MCP Tool: sr_execute_rpc
- * Execute a raw NETCONF RPC operation
- ******************************************************************************/
 static struct json_object *
 handle_sr_execute_rpc(const struct json_object *params)
 {
@@ -176,20 +291,75 @@ handle_sr_execute_rpc(const struct json_object *params)
         return NULL; /* Error: xpath is required */
     }
     
-    /* TODO: Implement actual sysrepo RPC execution */
-    /* xpath format: /module:rpc-name */
-    struct json_object *result = json_object_new_object();
-    struct json_object *output = json_object_new_object();
+    /* Extract input parameters */
+    struct json_object *input_params = NULL;
+    json_object_object_get_ex(params, "input_params", &input_params);
     
-    json_object_object_add(result, "output", output);
+    /* Build input values */
+    sr_val_t *input_values = NULL;
+    size_t input_count = 0;
+    
+    if (input_params && json_object_is_type(input_params, json_object)) {
+        json_object_object_foreach(input_params, key, val) {
+            sr_val v = { .path = key };
+            switch (json_object_get_type(val)) {
+            case json_type_boolean:
+                v.data.bool_val = json_object_get_boolean(val);
+                break;
+            case json_type_int:
+                v.data.uint8_val = json_object_get_int(val);
+                break;
+            case json_type_string:
+            case json_type_null:
+                v.data.str_val = json_object_get_string(val);
+                break;
+            default:
+                v.data.str_val = json_object_to_json_string(val);
+                break;
+            }
+            input_values = realloc(input_values, (input_count + 1) * sizeof(sr_val));
+            input_values[input_count] = v;
+            input_count++;
+        }
+    }
+    
+    /* Call sysrepo sr_rpc_send */
+    struct lyd_node *output = NULL;
+    int rc = sr_rpc_send(g_session, xpath, input_values, input_count, 0, &output);
+    free(input_values);
+    
+    if (rc != SR_ERR_OK) {
+        struct json_object *result = json_object_new_object();
+        json_object_object_add(result, "error", 
+            json_object_new_string(sr_strerror(rc)));
+        return result;
+    }
+    
+    /* Convert output to LYD_JSON format */
+    struct json_object *result = json_object_new_object();
+    struct json_object *output_data = json_object_new_object();
+    
+    if (output) {
+        char *json_str = NULL;
+        lyd_print_mem(&json_str, output, LYD_JSON, 0);
+        if (json_str) {
+            struct json_object *parsed = json_tokener_parse(json_str);
+            if (parsed) {
+                json_object_object_foreach(parsed, key, val) {
+                    json_object_object_add(output_data, key, json_object_get(val));
+                }
+                json_object_put(parsed);
+            }
+            free(json_str);
+        }
+        lyd_free_tree(output);
+    }
+    
+    json_object_object_add(result, "output", output_data);
     
     return result;
 }
 
-/******************************************************************************
- * MCP Tool: sr_action
- * Execute a YANG action
- ******************************************************************************/
 static struct json_object *
 handle_sr_action(const struct json_object *params)
 {
@@ -206,12 +376,38 @@ handle_sr_action(const struct json_object *params)
         return NULL; /* Error: xpath is required */
     }
     
-    /* TODO: Implement actual YANG action execution */
-    /* xpath format: /module:action-name */
-    struct json_object *result = json_object_new_object();
-    struct json_object *output = json_object_new_object();
+    /* Call sysrepo sr_rpc_send (actions are RPCs) */
+    struct lyd_node *output = NULL;
+    int rc = sr_rpc_send(g_session, xpath, NULL, 0, 0, &output);
     
-    json_object_object_add(result, "output", output);
+    if (rc != SR_ERR_OK) {
+        struct json_object *result = json_object_new_object();
+        json_object_object_add(result, "error", 
+            json_object_new_string(sr_strerror(rc)));
+        return result;
+    }
+    
+    /* Convert output to LYD_JSON format */
+    struct json_object *result = json_object_new_object();
+    struct json_object *output_data = json_object_new_object();
+    
+    if (output) {
+        char *json_str = NULL;
+        lyd_print_mem(&json_str, output, LYD_JSON, 0);
+        if (json_str) {
+            struct json_object *parsed = json_tokener_parse(json_str);
+            if (parsed) {
+                json_object_object_foreach(parsed, key, val) {
+                    json_object_object_add(output_data, key, json_object_get(val));
+                }
+                json_object_put(parsed);
+            }
+            free(json_str);
+        }
+        lyd_free_tree(output);
+    }
+    
+    json_object_object_add(result, "output", output_data);
     
     return result;
 }
@@ -247,11 +443,22 @@ handle_get_tree(const struct json_object *params)
         return NULL; /* Error: missing required parameters */
     }
     
-    /* TODO: Implement actual YANG tree retrieval via libyang */
+    /* Call sysrepo to get YANG schema tree */
+    struct ly_ctx *ly_ctx = sr_session_get_ctx(g_session);
+    const struct lysc_node *node = lys_find_path(NULL, ly_ctx->schemas, 
+                                                   module, xpath, 0, 0);
+    
     struct json_object *result = json_object_new_object();
     struct json_object *tree = json_object_new_object();
     struct json_object *nodes = json_object_new_array();
     struct json_object *references = json_object_new_array();
+    
+    if (node) {
+        json_object_object_add(tree, "module", 
+            json_object_new_string(module));
+        json_object_object_add(nodes, json_object_new_string(
+            json_object_new_string(node->name)));
+    }
     
     json_object_object_add(result, "tree", tree);
     json_object_object_add(result, "nodes", nodes);
@@ -260,10 +467,6 @@ handle_get_tree(const struct json_object *params)
     return result;
 }
 
-/******************************************************************************
- * MCP Tool: get_help
- * Get documentation for a YANG node
- ******************************************************************************/
 static struct json_object *
 handle_get_help(const struct json_object *params)
 {
@@ -280,16 +483,23 @@ handle_get_help(const struct json_object *params)
         return NULL; /* Error: xpath is required */
     }
     
-    /* TODO: Implement actual YANG help retrieval via libyang */
+    /* Call sysrepo/libyang to get node help */
+    struct ly_ctx *ly_ctx = sr_session_get_ctx(g_session);
+    const struct lysc_node *node = lys_find_path(NULL, ly_ctx->schemas, 
+                                                   "", xpath, 0, 0);
+    
     struct json_object *result = json_object_new_object();
     
     json_object_object_add(result, "path", json_object_new_string(xpath));
-    json_object_object_add(result, "node_type", 
-        json_object_new_string("container"));
-    json_object_object_add(result, "description", 
-        json_object_new_string("YANG node description"));
-    json_object_object_add(result, "mandatory", 
-        json_object_new_boolean(0));
+    
+    if (node) {
+        json_object_object_add(result, "node_type", 
+            json_object_new_string(lys_node_type_str(node->type)));
+        if (node->dsc) {
+            json_object_object_add(result, "description", 
+                json_object_new_string(node->dsc->t[0].str));
+        }
+    }
     
     return result;
 }
@@ -509,6 +719,12 @@ main(int argc, char *argv[])
         return 0;
     }
     
+    /* Initialize sysrepo connection */
+    if (init_sysrepo() != SR_ERR_OK) {
+        fprintf(stderr, "sysrepo-mcp: failed to initialize sysrepo\n");
+        return 1;
+    }
+    
     /* Install signal handlers */
     if (signal(SIGINT, signal_handler) == SIG_ERR) {
         fprintf(stderr, "Failed to install SIGINT handler: %s\n", strerror(errno));
@@ -560,6 +776,9 @@ main(int argc, char *argv[])
     
     /* Cleanup FastCGI */
     FCGX_Finish();
+    
+    /* Cleanup sysrepo */
+    cleanup_sysrepo();
     
     fprintf(stderr, "sysrepo-mcp: shutdown complete\n");
     
