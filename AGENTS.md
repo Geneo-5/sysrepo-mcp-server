@@ -249,8 +249,9 @@ Ce projet est distribué sous les termes de la licence **LGPL-3.0**
 - Configurer les dependances dans ebuild.mk (fcgi2, json-c, sysrepo)
 - Verifier que le code compile avec scripts/build-docker.sh
 - Maintenir AGENTS.md avec l'etat actuel du projet
-
-### En cours / A implementer
+- Creer des tests unitaires pour chaque outil MCP
+- Tester avec des modeles YANG concrets (oven.yang, etc.)
+- Tester le reverse proxy (lighttpd/nginx) avec FastCGI
 
 #### Serveur FastCGI de base
 - Implemente la gestion complete des connexions FastCGI
@@ -318,12 +319,6 @@ Ce projet est distribué sous les termes de la licence **LGPL-3.0**
 - Tester avec des modeles YANG concrets (oven.yang, etc.)
 - Valider la compatibilite avec les agents IA (OpenHands, etc.)
 - Tester le reverse proxy (lighttpd/nginx) avec FastCGI
-
-#### Documentation finale
-- Ajouter des exemples complets d'utilisation
-- Documenter les erreurs possibles et codes d'erreur
-- Creer un guide de deploiement
-- Documenter la configuration du reverse proxy
 
 ### Backlog (futur)
 
