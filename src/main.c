@@ -12,322 +12,521 @@
 #include <signal.h>
 #include <errno.h>
 
+/* FastCGI - C only headers */
+#include <fcgi_stdio.h>
+
+/* JSON-C */
 #include <json-c/json.h>
 
-#include "config.h"
+/******************************************************************************
+ * Server version
+ ******************************************************************************/
+#define SERVER_VERSION "0.1.0"
 
-/* =========================================================================
- * Compile-time defaults from config.in (Kconfig)
- * ========================================================================= */
+/******************************************************************************
+ * MCP Tool: get_status
+ * Returns server status information
+ ******************************************************************************/
+static struct json_object *
+handle_get_status(const struct json_object *params)
+{
+    (void)params; /* Unused parameter */
+    struct json_object *result = json_object_new_object();
+    
+    json_object_object_add(result, "version", 
+        json_object_new_string(SERVER_VERSION));
+    json_object_object_add(result, "uptime_seconds", 
+        json_object_new_int(0));
+    json_object_object_add(result, "active_sessions", 
+        json_object_new_int(0));
+    json_object_object_add(result, "max_sessions", 
+        json_object_new_int(64));
+    
+    return result;
+}
 
-/* Transport mode (UNIX_SOCKET or TCP) */
-#ifndef UNIX_SOCKET
-#  define UNIX_SOCKET_DEFAULT 0
-#else  /* UNIX_SOCKET */
-#  define UNIX_SOCKET_DEFAULT 1
-#endif /* UNIX_SOCKET */
+/******************************************************************************
+ * MCP Tool: sr_get_config
+ * Read configuration from a YANG module
+ ******************************************************************************/
+static struct json_object *
+handle_sr_get_config(const struct json_object *params)
+{
+    const char *xpath = NULL;
+    const char *datastore = "running";
+    const char *depth = "deep";
+    
+    /* Extract parameters */
+    struct json_object *xpath_obj;
+    if (json_object_object_get_ex(params, "xpath", &xpath_obj)) {
+        xpath = json_object_get_string(xpath_obj);
+    }
+    
+    struct json_object *datastore_obj;
+    if (json_object_object_get_ex(params, "datastore", &datastore_obj)) {
+        datastore = json_object_get_string(datastore_obj);
+    }
+    
+    struct json_object *depth_obj;
+    if (json_object_object_get_ex(params, "depth", &depth_obj)) {
+        depth = json_object_get_string(depth_obj);
+    }
+    
+    if (!xpath) {
+        return NULL; /* Error: xpath is required */
+    }
+    
+    /* TODO: Implement actual sysrepo sr_get_config call */
+    /* For now, return empty data as skeleton */
+    struct json_object *result = json_object_new_object();
+    struct json_object *data = json_object_new_object();
+    
+    json_object_object_add(result, "data", data);
+    json_object_object_add(result, "module", 
+        json_object_new_string("sysrepo-mcp"));
+    json_object_object_add(result, "path", 
+        json_object_new_string(xpath));
+    
+    return result;
+}
 
-#ifndef TCP
-#  define TCP_DEFAULT 0
-#else  /* TCP */
-#  define TCP_DEFAULT 1
-#endif /* TCP */
+/******************************************************************************
+ * MCP Tool: sr_edit_config
+ * Apply configuration changes
+ ******************************************************************************/
+static struct json_object *
+handle_sr_edit_config(const struct json_object *params)
+{
+    const char *xpath = NULL;
+    const char *target = NULL;
+    struct json_object *config_obj = NULL;
+    
+    /* Extract required parameters */
+    struct json_object *xpath_obj;
+    if (!json_object_object_get_ex(params, "xpath", &xpath_obj)) {
+        return NULL; /* Error: xpath is required */
+    }
+    xpath = json_object_get_string(xpath_obj);
+    
+    struct json_object *target_obj;
+    if (json_object_object_get_ex(params, "target", &target_obj)) {
+        target = json_object_get_string(target_obj);
+    }
+    
+    if (!json_object_object_get_ex(params, "config", &config_obj)) {
+        return NULL; /* Error: config is required */
+    }
+    
+    if (!xpath || !target) {
+        return NULL; /* Error: missing required parameters */
+    }
+    
+    /* TODO: Implement actual sysrepo sr_edit_config call */
+    struct json_object *result = json_object_new_object();
+    json_object_object_add(result, "ok", json_object_new_boolean(1));
+    
+    return result;
+}
 
-/* Default values from Kconfig */
-#define MCP_ENDPOINT_DEFAULT        "/mcp"
-#define MCP_SESSION_TTL_DEFAULT     1800
-#define MCP_MAX_SESSIONS_DEFAULT    64
-#define FCGI_SOCK_PATH_DEFAULT      "/var/run/sysrepo-mcp.sock"
-#define FCGI_HOST_DEFAULT           "127.0.0.1"
-#define FCGI_PORT_DEFAULT           8080
-#define ACL_ENABLED_DEFAULT         1
-#define ACL_API_KEY_BEARER_DEFAULT  1
-#define ACL_COOKIE_DEFAULT          0
-#define ACL_COOKIE_NAME_DEFAULT     "mcp_session"
-#define ACL_KEYS_FILE_DEFAULT       "/etc/sysrepo-mcp/keys"
-#define ACL_NACM_USER_DEFAULT       "mcp"
-#define ACL_NACM_USERS_DEFAULT      "mcp:operators"
-#define ACL_DENY_UNKNOWN_DEFAULT    1
-#define SR_USERNAME_DEFAULT         "mcp"
-#define SR_TIMEOUT_DEFAULT          5000
-#define LOG_SYSLOG_DEFAULT          1
-#define LOG_LEVEL_DEFAULT           6
-#define LOG_CONSOLE_DEFAULT         0
-#define LOG_FILE_DEFAULT            "/var/log/sysrepo-mcp.log"
-#define LOG_DAILY_ROTATE_DEFAULT    1
+/******************************************************************************
+ * MCP Tool: sr_get_operational
+ * Read operational state data
+ ******************************************************************************/
+static struct json_object *
+handle_sr_get_operational(const struct json_object *params)
+{
+    const char *xpath = NULL;
+    
+    /* Extract parameters */
+    struct json_object *xpath_obj;
+    if (json_object_object_get_ex(params, "xpath", &xpath_obj)) {
+        xpath = json_object_get_string(xpath_obj);
+    }
+    
+    if (!xpath) {
+        return NULL; /* Error: xpath is required */
+    }
+    
+    /* TODO: Implement actual sysrepo sr_get_operational call */
+    struct json_object *result = json_object_new_object();
+    struct json_object *data = json_object_new_object();
+    
+    json_object_object_add(result, "data", data);
+    
+    return result;
+}
 
-#ifdef CONFIG_SYSREPO_MCP_SERVER_SYSLOG
-#include <syslog.h>
-#endif /* CONFIG_SYSREPO_MCP_SERVER_SYSLOG */
+/******************************************************************************
+ * MCP Tool: sr_execute_rpc
+ * Execute a raw NETCONF RPC operation
+ ******************************************************************************/
+static struct json_object *
+handle_sr_execute_rpc(const struct json_object *params)
+{
+    const char *xpath = NULL;
+    
+    /* Extract required parameters */
+    struct json_object *xpath_obj;
+    if (!json_object_object_get_ex(params, "xpath", &xpath_obj)) {
+        return NULL; /* Error: xpath is required */
+    }
+    xpath = json_object_get_string(xpath_obj);
+    
+    if (!xpath) {
+        return NULL; /* Error: xpath is required */
+    }
+    
+    /* TODO: Implement actual sysrepo RPC execution */
+    /* xpath format: /module:rpc-name */
+    struct json_object *result = json_object_new_object();
+    struct json_object *output = json_object_new_object();
+    
+    json_object_object_add(result, "output", output);
+    
+    return result;
+}
 
-#ifdef CONFIG_SYSREPO_MCP_SERVER_VERBOSE
-#define sysrepo_mcp_server_debug(fmt, ...) \
-        fprintf(stderr, "sysrepo-mcp: " fmt "\n", ##__VA_ARGS__)
-#else  /* !CONFIG_SYSREPO_MCP_SERVER_VERBOSE */
-#define sysrepo_mcp_server_debug(fmt, ...)
-#endif /* defined(CONFIG_SYSREPO_MCP_SERVER_VERBOSE) */
+/******************************************************************************
+ * MCP Tool: sr_action
+ * Execute a YANG action
+ ******************************************************************************/
+static struct json_object *
+handle_sr_action(const struct json_object *params)
+{
+    const char *xpath = NULL;
+    
+    /* Extract required parameters */
+    struct json_object *xpath_obj;
+    if (!json_object_object_get_ex(params, "xpath", &xpath_obj)) {
+        return NULL; /* Error: xpath is required */
+    }
+    xpath = json_object_get_string(xpath_obj);
+    
+    if (!xpath) {
+        return NULL; /* Error: xpath is required */
+    }
+    
+    /* TODO: Implement actual YANG action execution */
+    /* xpath format: /module:action-name */
+    struct json_object *result = json_object_new_object();
+    struct json_object *output = json_object_new_object();
+    
+    json_object_object_add(result, "output", output);
+    
+    return result;
+}
 
-/* =========================================================================
- * Configuration structure (from config.in defaults + sysrepo runtime)
- * ========================================================================= */
+/******************************************************************************
+ * MCP Tool: get_tree
+ * Get YANG schema tree
+ ******************************************************************************/
+static struct json_object *
+handle_get_tree(const struct json_object *params)
+{
+    const char *module = NULL;
+    const char *xpath = "/";
+    struct json_object *revision_obj = NULL;
+    struct json_object *with_comments_obj = NULL;
+    
+    /* Extract parameters */
+    struct json_object *module_obj;
+    if (!json_object_object_get_ex(params, "module", &module_obj)) {
+        return NULL; /* Error: module is required */
+    }
+    module = json_object_get_string(module_obj);
+    
+    struct json_object *xpath_obj;
+    if (json_object_object_get_ex(params, "xpath", &xpath_obj)) {
+        xpath = json_object_get_string(xpath_obj);
+    }
+    
+    (void)json_object_object_get_ex(params, "revision", &revision_obj);
+    (void)json_object_object_get_ex(params, "with-comments", &with_comments_obj);
+    
+    if (!module || !xpath) {
+        return NULL; /* Error: missing required parameters */
+    }
+    
+    /* TODO: Implement actual YANG tree retrieval via libyang */
+    struct json_object *result = json_object_new_object();
+    struct json_object *tree = json_object_new_object();
+    struct json_object *nodes = json_object_new_array();
+    struct json_object *references = json_object_new_array();
+    
+    json_object_object_add(result, "tree", tree);
+    json_object_object_add(result, "nodes", nodes);
+    json_object_object_add(result, "references", references);
+    
+    return result;
+}
 
-struct sysrepo_mcp_server_config {
-        /* Server */
-        char *endpoint;
-        int   session_ttl;
-        int   max_sessions;
+/******************************************************************************
+ * MCP Tool: get_help
+ * Get documentation for a YANG node
+ ******************************************************************************/
+static struct json_object *
+handle_get_help(const struct json_object *params)
+{
+    const char *xpath = NULL;
+    
+    /* Extract required parameters */
+    struct json_object *xpath_obj;
+    if (!json_object_object_get_ex(params, "xpath", &xpath_obj)) {
+        return NULL; /* Error: xpath is required */
+    }
+    xpath = json_object_get_string(xpath_obj);
+    
+    if (!xpath) {
+        return NULL; /* Error: xpath is required */
+    }
+    
+    /* TODO: Implement actual YANG help retrieval via libyang */
+    struct json_object *result = json_object_new_object();
+    
+    json_object_object_add(result, "path", json_object_new_string(xpath));
+    json_object_object_add(result, "node_type", 
+        json_object_new_string("container"));
+    json_object_object_add(result, "description", 
+        json_object_new_string("YANG node description"));
+    json_object_object_add(result, "mandatory", 
+        json_object_new_boolean(0));
+    
+    return result;
+}
 
-        /* FastCGI transport */
-#if UNIX_SOCKET_DEFAULT
-        char *sock_path;
-#else  /* TCP */
-        char *host;
-        int   port;
-#endif /* UNIX_SOCKET */
-
-        /* Access control */
-#if ACL_ENABLED_DEFAULT
-        int   acl_enabled;
-        int   api_key_bearer;   /* 1 = bearer, 0 = cookie */
-        char *cookie_name;
-        char *keys_file;
-        char *nacm_user;
-        char *nacm_users;
-        int   deny_unknown;
-#endif /* ACL_ENABLED */
-
-        /* Sysrepo library connection */
-        char *sr_username;
-        int   sr_timeout;
-
-        /* Logging (elog defaults) */
-#if LOG_SYSLOG_DEFAULT
-        int   log_to_syslog;
-#endif /* LOG_SYSLOG */
-        int   log_level;
-#if LOG_CONSOLE_DEFAULT
-        int   log_to_console;
-#endif /* LOG_CONSOLE */
-        char *log_file;
-#if LOG_DAILY_ROTATE_DEFAULT
-        int   daily_rotate;
-#endif /* LOG_DAILY_ROTATE */
+/******************************************************************************
+ * Tool dispatch table
+ ******************************************************************************/
+struct tool_handler {
+    const char *name;
+    struct json_object *(*handler)(const struct json_object *params);
 };
 
-/* =========================================================================
- * Initialize configuration with compile-time defaults
- * ========================================================================= */
+static const struct tool_handler tool_handlers[] = {
+    { "get_status",      handle_get_status      },
+    { "sr_get_config",   handle_sr_get_config   },
+    { "sr_edit_config",  handle_sr_edit_config  },
+    { "sr_get_operational", handle_sr_get_operational },
+    { "sr_execute_rpc",  handle_sr_execute_rpc  },
+    { "sr_action",       handle_sr_action       },
+    { "get_tree",        handle_get_tree        },
+    { "get_help",        handle_get_help        },
+    { NULL, NULL }
+};
 
-static struct sysrepo_mcp_server_config
-sysrepo_mcp_server_config_defaults(void)
+/******************************************************************************
+ * Find tool handler by name
+ ******************************************************************************/
+static const struct tool_handler *
+find_tool_handler(const char *name)
 {
-        struct sysrepo_mcp_server_config config;
-
-        memset(&config, 0, sizeof(config));
-
-        /* Server */
-        config.endpoint       = strdup(MCP_ENDPOINT_DEFAULT);
-        config.session_ttl    = MCP_SESSION_TTL_DEFAULT;
-        config.max_sessions   = MCP_MAX_SESSIONS_DEFAULT;
-
-        /* FastCGI transport */
-#if UNIX_SOCKET_DEFAULT
-        config.sock_path = strdup(FCGI_SOCK_PATH_DEFAULT);
-#else  /* TCP */
-        config.host = strdup(FCGI_HOST_DEFAULT);
-        config.port = FCGI_PORT_DEFAULT;
-#endif /* UNIX_SOCKET */
-
-        /* Access control */
-#if ACL_ENABLED_DEFAULT
-        config.acl_enabled      = 1;
-        config.api_key_bearer   = ACL_API_KEY_BEARER_DEFAULT;
-        config.cookie_name      = strdup(ACL_COOKIE_NAME_DEFAULT);
-        config.keys_file        = strdup(ACL_KEYS_FILE_DEFAULT);
-        config.nacm_user        = strdup(ACL_NACM_USER_DEFAULT);
-        config.nacm_users       = strdup(ACL_NACM_USERS_DEFAULT);
-        config.deny_unknown     = ACL_DENY_UNKNOWN_DEFAULT;
-#endif /* ACL_ENABLED */
-
-        /* Sysrepo library connection */
-        config.sr_username     = strdup(SR_USERNAME_DEFAULT);
-        config.sr_timeout      = SR_TIMEOUT_DEFAULT;
-
-        /* Logging (elog) */
-#if LOG_SYSLOG_DEFAULT
-        config.log_to_syslog = 1;
-#endif /* LOG_SYSLOG */
-        config.log_level = LOG_LEVEL_DEFAULT;
-#if LOG_CONSOLE_DEFAULT
-        config.log_to_console = 0;
-#endif /* LOG_CONSOLE */
-        config.log_file = strdup(LOG_FILE_DEFAULT);
-#if LOG_DAILY_ROTATE_DEFAULT
-        config.daily_rotate = 1;
-#endif /* LOG_DAILY_ROTATE */
-
-        return config;
+    for (int i = 0; tool_handlers[i].name != NULL; i++) {
+        if (strcmp(tool_handlers[i].name, name) == 0) {
+            return &tool_handlers[i];
+        }
+    }
+    return NULL;
 }
 
-/* =========================================================================
- * Print configuration (debug / validation)
- * ========================================================================= */
-
+/******************************************************************************
+ * Build MCP JSON-RPC response
+ ******************************************************************************/
 static void
-sysrepo_mcp_server_print_config(
-        const struct sysrepo_mcp_server_config *config)
+send_mcp_response(int id, struct json_object *result, 
+                  int error_code, const char *error_msg)
 {
-        printf("sysrepo-mcp configuration (compile-time defaults):\n");
-        printf("  endpoint          = %s\n", config->endpoint);
-        printf("  session_ttl       = %d\n", config->session_ttl);
-        printf("  max_sessions      = %d\n", config->max_sessions);
-
-#if UNIX_SOCKET_DEFAULT
-        printf("  transport         = unix\n");
-        printf("  sock_path         = %s\n", config->sock_path);
-#else  /* TCP */
-        printf("  transport         = tcp\n");
-        printf("  host              = %s\n", config->host);
-        printf("  port              = %d\n", config->port);
-#endif /* UNIX_SOCKET */
-
-#if ACL_ENABLED_DEFAULT
-        printf("  acl_enabled       = %d\n", config->acl_enabled);
-        printf("  api_key_bearer    = %d\n", config->api_key_bearer);
-        printf("  cookie_name       = %s\n", config->cookie_name);
-        printf("  keys_file         = %s\n", config->keys_file);
-        printf("  nacm_user         = %s\n", config->nacm_user);
-        printf("  nacm_users        = %s\n", config->nacm_users);
-        printf("  deny_unknown      = %d\n", config->deny_unknown);
-#endif /* ACL_ENABLED */
-
-        printf("  sr_username       = %s\n", config->sr_username);
-        printf("  sr_timeout        = %d\n", config->sr_timeout);
-        printf("  log_level         = %d\n", config->log_level);
-        printf("  log_file          = %s\n", config->log_file);
+    struct json_object *response = json_object_new_object();
+    
+    json_object_object_add(response, "jsonrpc", 
+        json_object_new_string("2.0"));
+    json_object_object_add(response, "id", 
+        json_object_new_int(id));
+    
+    if (error_code == 0) {
+        json_object_object_add(response, "result", result);
+    } else {
+        struct json_object *error = json_object_new_object();
+        json_object_object_add(error, "code", 
+            json_object_new_int(error_code));
+        json_object_object_add(error, "message", 
+            json_object_new_string(error_msg ? error_msg : "Unknown error"));
+        json_object_object_add(response, "error", error);
+    }
+    
+    const char *response_str = json_object_to_json_string(response);
+    
+    /* Send HTTP response */
+    printf("Content-Type: application/json\r\n\r\n");
+    printf("%s", response_str);
+    
+    json_object_put(response);
+    free((void *)response_str);
 }
 
-/* =========================================================================
- * Free configuration
- * ========================================================================= */
-
+/******************************************************************************
+ * Process MCP JSON-RPC request
+ ******************************************************************************/
 static void
-sysrepo_mcp_server_config_free(
-        struct sysrepo_mcp_server_config *config)
+process_mcp_request(const char *request_body)
 {
-        free(config->endpoint);
-#if UNIX_SOCKET_DEFAULT
-        free(config->sock_path);
-#else  /* TCP */
-        free(config->host);
-#endif /* UNIX_SOCKET */
-
-#if ACL_ENABLED_DEFAULT
-        free(config->cookie_name);
-        free(config->keys_file);
-        free(config->nacm_user);
-        free(config->nacm_users);
-#endif /* ACL_ENABLED */
-
-        free(config->sr_username);
-        free(config->log_file);
+    struct json_object *request_json = json_tokener_parse(request_body);
+    
+    if (!request_json) {
+        send_mcp_response(0, NULL, -32700, "Parse error");
+        return;
+    }
+    
+    /* Extract method */
+    struct json_object *method_obj;
+    if (!json_object_object_get_ex(request_json, "method", &method_obj)) {
+        send_mcp_response(0, NULL, -32600, "Invalid request");
+        json_object_put(request_json);
+        return;
+    }
+    
+    const char *method = json_object_get_string(method_obj);
+    
+    /* Extract id */
+    struct json_object *id_obj;
+    int id = 0;
+    if (json_object_object_get_ex(request_json, "id", &id_obj)) {
+        id = json_object_get_int(id_obj);
+    }
+    
+    /* Extract params */
+    struct json_object *params = NULL;
+    json_object_object_get_ex(request_json, "params", &params);
+    
+    /* Handle tools/call method */
+    if (strcmp(method, "tools/call") == 0 && params) {
+        struct json_object *name_obj;
+        struct json_object *arguments;
+        
+        if (json_object_object_get_ex(params, "name", &name_obj) &&
+            json_object_object_get_ex(params, "arguments", &arguments)) {
+            
+            const char *tool_name = json_object_get_string(name_obj);
+            const struct tool_handler *handler = find_tool_handler(tool_name);
+            
+            if (handler) {
+                struct json_object *result = handler->handler(arguments);
+                if (result) {
+                    send_mcp_response(id, result, 0, NULL);
+                    json_object_put(result);
+                } else {
+                    send_mcp_response(id, NULL, -32602, 
+                                     "Invalid parameters");
+                }
+            } else {
+                send_mcp_response(id, NULL, -32601, 
+                                 "Tool not found");
+            }
+        } else {
+            send_mcp_response(id, NULL, -32602, 
+                             "Invalid parameters");
+        }
+    } else {
+        send_mcp_response(id, NULL, -32601, "Method not found");
+    }
+    
+    json_object_put(request_json);
 }
 
+/******************************************************************************
+ * Signal handler
+ ******************************************************************************/
 static volatile sig_atomic_t server_stopping = 0;
 
 static void
-server_signal_handler(int signum)
+signal_handler(int signum)
 {
-        if (signum == SIGINT || signum == SIGTERM)
-                server_stopping = 1;
+    (void)signum; /* Unused parameter */
+    server_stopping = 1;
 }
 
+/******************************************************************************
+ * Show help
+ ******************************************************************************/
+static void
+show_help(void)
+{
+    printf("sysrepo-mcp: sysrepo to MCP bridge\n");
+    printf("Usage: sysrepo-mcp [options]\n");
+    printf("  --help        Show this help\n");
+    printf("  --version     Show version\n");
+}
+
+/******************************************************************************
+ * Main entry point - FastCGI server
+ ******************************************************************************/
 int
 main(int argc, char *argv[])
 {
-        struct sysrepo_mcp_server_config config;
-
-        if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-                printf("sysrepo-mcp: sysrepo to MCP bridge\n");
-                printf("Usage: sysrepo-mcp [options]\n");
-                printf("  --help        Show this help\n");
-                printf("  --version     Show version\n");
-                return 0;
+    /* Handle command-line options */
+    if (argc > 1) {
+        if (strcmp(argv[1], "--help") == 0) {
+            show_help();
+            return 0;
         }
-
-        if (argc > 1 && strcmp(argv[1], "--version") == 0) {
-                printf("sysrepo-mcp " PACKAGE_VERSION "\n");
-                return 0;
+        if (strcmp(argv[1], "--version") == 0) {
+            printf("sysrepo-mcp " SERVER_VERSION "\n");
+            return 0;
         }
-
-        /* Install signal handlers */
-        if (signal(SIGINT, server_signal_handler) == SIG_ERR) {
-                fprintf(stderr, "sysrepo-mcp: failed to install "
-                               "SIGINT handler: %s\n", strerror(errno));
-                return 1;
+    }
+    
+    /* Install signal handlers */
+    if (signal(SIGINT, signal_handler) == SIG_ERR) {
+        fprintf(stderr, "Failed to install SIGINT handler: %s\n", strerror(errno));
+        return 1;
+    }
+    if (signal(SIGTERM, signal_handler) == SIG_ERR) {
+        fprintf(stderr, "Failed to install SIGTERM handler: %s\n", strerror(errno));
+        return 1;
+    }
+    
+    /* Initialize FastCGI */
+    FCGX_Request request;
+    FCGX_Init();
+    FCGX_InitRequest(&request, 0, 0);
+    
+    /* Log startup */
+    fprintf(stderr, "sysrepo-mcp: starting FastCGI server\n");
+    
+    /* Main FastCGI request loop */
+    while (!server_stopping) {
+        int rc = FCGX_Accept_r(&request);
+        
+        if (rc < 0) {
+            break; /* Error or end of connection */
         }
-
-        if (signal(SIGTERM, server_signal_handler) == SIG_ERR) {
-                fprintf(stderr, "sysrepo-mcp: failed to install "
-                               "SIGTERM handler: %s\n", strerror(errno));
-                return 1;
+        
+        /* Read request body from stdin */
+        char *content_length_str = FCGX_GetParam("CONTENT_LENGTH", request.envp);
+        int content_length = content_length_str ? atoi(content_length_str) : 0;
+        
+        char *request_body = NULL;
+        if (content_length > 0 && content_length < 1024 * 1024) {
+            request_body = malloc(content_length + 1);
+            if (request_body) {
+                int nread = fread(request_body, 1, content_length, stdin);
+                request_body[nread] = '\0';
+            }
         }
-
-        /* Initialize configuration with compile-time defaults */
-        config = sysrepo_mcp_server_config_defaults();
-
-        /* Print configuration (for validation / debug) */
-        sysrepo_mcp_server_debug("Configuration loaded:");
-        sysrepo_mcp_server_print_config(&config);
-
-        /* TODO: Initialize sysrepo connection */
-        sysrepo_mcp_server_debug("Initializing sysrepo connection");
-
-        /* TODO: Initialize MCP server (stream listener) */
-        sysrepo_mcp_server_debug("Initializing MCP server");
-
-        /* TODO: Register MCP tools */
-        /* Available MCP tools (to be implemented):
-         *
-         * Configuration:
-         *   sr_get_config  - Read config from YANG module (xpath, datastore, depth)
-         *   sr_edit_config - Apply config changes to YANG module (config, target, xpath)
-         *   sr_copy_config - Copy config between datastores (source, target, xpath)
-         *
-         * Operational:
-         *   sr_get_operational  - Read operational data (xpath, datastore, depth)
-         *
-         * Subscriptions:
-         *   sr_subscribe_oper_changes - Subscribe to operational changes (xpath, cb_type)
-         *   sr_subscribe_notifs       - Subscribe to notifications (xpath, event_type)
-         *
-         * Module Management:
-         *   sr_module_install    - Install YANG module (yang_file, features, imports)
-         *   sr_module_uninstall  - Uninstall YANG module (module_name)
-         *
-         * RPC / Actions:
-         *   sr_execute_rpc - Execute raw NETCONF RPC (rpc_name, input_params, xpath)
-         *   sr_action      - Execute YANG action (module, action_name, input_params, xpath)
-         *
-         * System Status:
-         *   get_status     - Server health (version, uptime, session_count, verbose)
-         *
-         * YANG Explorer:
-         *   get_tree       - YANG schema tree (module, revision, path, with-comments)
-         *   get_help       - Node documentation (xpath, module)
-         */
-
-        /* TODO: Run event loop */
-        while (!server_stopping) {
-                /* Event loop placeholder */
-                sleep(1);
+        
+        /* Process MCP request */
+        if (request_body) {
+            process_mcp_request(request_body);
+            free(request_body);
         }
-
-        /* TODO: Cleanup */
-        sysrepo_mcp_server_debug("Shutting down");
-
-        /* Free configuration */
-        sysrepo_mcp_server_config_free(&config);
-
-        return 0;
+        
+        /* Finish request */
+        FCGX_Finish_r(&request);
+    }
+    
+    /* Cleanup FastCGI */
+    FCGX_Finish();
+    
+    fprintf(stderr, "sysrepo-mcp: shutdown complete\n");
+    
+    return 0;
 }
