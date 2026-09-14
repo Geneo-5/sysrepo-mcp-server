@@ -1,10 +1,9 @@
 # docker/ — Build environment (Docker)
 
 This directory contains a self-contained **build environment** image for
-sysrepo-mcp, meant for **CI and agent-driven builds** — not the usual
-development workflow (see the root [README](../README.md) for the standard
-`make`-based build, which assumes the dependencies are already installed on
-the build host).
+sysrepo-mcp, meant for **CI and agent-driven builds**. All dependencies are
+pre-installed in the image. The project is compiled at runtime on a
+bind-mounted working directory, so the sources stay in the host checkout.
 
 The image (based on `debian:trixie-slim`) installs every build & runtime
 dependency and compiles the external libraries vendored in `extern/` under
@@ -36,14 +35,18 @@ repository root.
 The `extern/` sources are downloaded and extracted from their versioned
 upstream URLs:
 
-| Library | Version |
-|---------|---------|
-| ebuild  | master  |
-| libyang | 5.8.6   |
-| sysrepo | 5.1.0   |
-| stroll  | master  |
-| utils   | master  |
-| fcgi2   | 2.4.7   |
+| Library | Version | Purpose |
+|---------|---------|---------|
+| ebuild  | master  | Build system |
+| libyang | 5.8.6   | YANG schema parsing |
+| sysrepo | 5.1.0   | NETCONF datastore API |
+| stroll  | master  | Data structures |
+| utils   | master  | eTux utilities |
+| fcgi2   | 2.4.7   | FastCGI transport (required) |
+| json-c  | 0.16    | JSON parsing |
+
+> **Note** : The `extern/` directory contains source references for agents.
+> These libraries are compiled and installed in the Docker image at `/usr/local`.
 
 > `extern/` is intentionally excluded from the repository (`.gitignore`).
 > It is a download destination, never a source tree — and never modified in
@@ -100,8 +103,16 @@ make -C docker build-nc
 
 ## Files
 
-- `Dockerfile` — build environment image (packages + extern/ libraries).
+- `Dockerfile` — build environment image (all dependencies pre-installed).
 - `Makefile` — `build` / `build-nc` / `run` / `test` / `extern` /
   `extern-clean` helpers.
-- `config.cfg` — reference [libconfig](http://www.cksystem.com/libconfig/)
-  configuration sample for the server.
+
+## Extern Directory
+
+The `extern/` directory contains source code for all external dependencies:
+- Used as **build sources** for the Docker image (compiled and installed to `/usr/local`)
+- Used as **reference material** for IA agents (read-only source code)
+
+> **Important** : `extern/` is excluded from Git (`.gitignore`).
+> Sources are automatically downloaded via `make -C docker extern` and must
+> never be modified manually.

@@ -14,7 +14,7 @@ main.o-src             := $(srctop)/main.c
 $(PACKAGE)-cflags      := -I$(TOPDIR)/include \
                           -DPACKAGE_NAME='"$(PACKAGE)"' \
                           -DPACKAGE_VERSION='"$(VERSION)"'
-$(PACKAGE)-ldflags     :=
+$(PACKAGE)-ldflags     := $(shell pkg-config --libs json-c 2>/dev/null)
 
 
 ################################################################################

@@ -12,6 +12,8 @@
 #include <signal.h>
 #include <errno.h>
 
+#include <json-c/json.h>
+
 #include "config.h"
 
 /* =========================================================================
@@ -288,8 +290,8 @@ main(int argc, char *argv[])
         /* Available MCP tools (to be implemented):
          *
          * Configuration:
-         *   sr_get_config  - Read config from YANG module (module, xpath, datastore, depth)
-         *   sr_edit_config - Apply config changes to YANG module (module, config, target, xpath)
+         *   sr_get_config  - Read config from YANG module (xpath, datastore, depth)
+         *   sr_edit_config - Apply config changes to YANG module (config, target, xpath)
          *   sr_copy_config - Copy config between datastores (source, target, xpath)
          *
          * Operational:

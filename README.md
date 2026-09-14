@@ -5,11 +5,15 @@ Serveur MCP (Model Context Protocol) qui expose les fonctionnalités de
 configurer un système via des données sysrepo (modèles YANG) et d'en
 contrôler le statut en temps réel.
 
+> **Note** : Ce projet est un squelette d'intégration. Aucune fonctionnalité
+> n'est implémentée à ce stade. La documentation décrit l'architecture cible
+> et les choix techniques.
+
 ## Fonctionnalités
 
-- **Configuration** : l'agent IA peut modifier la configuration du système
+- **Configuration** : l'agent IA pourra modifier la configuration du système
   via l'API sysrepo (modèles YANG).
-- **Monitoring** : le serveur expose les status et événements du système
+- **Monitoring** : le serveur exposera les status et événements du système
   (notifications sysrepo, états des interfaces, routes, ...).
 - **Sécurité** : authentification et autorisation de l'agent avant les
   opérations sensibles ; journalisation de toutes les opérations.
@@ -19,64 +23,69 @@ contrôler le statut en temps réel.
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
 │   AI Agent  │◄────►│  MCP Server  │◄────►│   sysrepo   │
-│ (OpenHands, │      │  (ce projet) │      │   Daemon    │
-│  etc.)      │      └──────────────┘      └─────────────┘
-└─────────────┘                                │
-                                               ▼
-                                      ┌──────────────┐
-                                      │ YANG Models  │
-                                      │(configuration)│
-                                      └──────────────┘
+│ (OpenHands, │      │  (ce projet) │      │  Library    │
+│  etc.)      │      └──────────────┘      │ (linked)    │
+└─────────────┘                            └─────────────┘
+                                             │
+                                             ▼
+                                    ┌──────────────┐
+                                    │ YANG Models  │
+                                    │ (sysrepo-mcp │
+                                    │  + custom)  │
+                                    └──────────────┘
 ```
 
 - **libyang** : moteur YANG (parsing / validation des schémas).
-- **sysrepo** : datastore de configuration NETCONF.
-- **fcgi2** : bibliothèque FastCGI (`libfcgi`) pour le transport.
+- **sysrepo** : bibliothèque C de gestion du datastore de configuration NETCONF.
+  Le serveur utilise sysrepo **en mode librairie** (linked at build time),
+  accédant directement aux fichiers du datastore (`/etc/sysrepo/data/`).
+  Le serveur implémente son propre modèle YANG (`yang/sysrepo-mcp.yang`) pour la
+  configuration du serveur et son état opérationnel.
+- **fcgi2** : bibliothèque FastCGI (`libfcgi`) pour le transport. **Obligatoire**.
+- **json-c** : bibliothèque JSON pour le parsing/la génération de messages JSON-RPC.
 - **utils** / **stroll** : bibliothèques utilitaires eTux.
 - **ebuild** : système de construction Makefile.
 
 ## Construction
 
-La construction se fait **sur un système où les dépendances sont déjà
-installées** (voir [Prérequis](#prérequis)). Le workflow standard est :
+La construction se fait **uniquement via Docker** (recommandé pour CI et agents IA).
+Le workflow standard est :
 
 ```sh
-make config     # génère build/.config + build/config.h (Kconfig menuconfig)
-make            # compile le binaire build/sysrepo-mcp
-make install    # installe /usr/local/bin/sysrepo-mcp
+make -C docker build    # télécharge extern/ + construit l'image
+make -C docker run      # shell interactif : les libs sont toutes là
+make                    # compile le binaire build/sysrepo-mcp
+make install            # installe /usr/local/bin/sysrepo-mcp
 ```
 
 `make config` ouvre l'interface `menuconfig` du système eBuild pour
-configurer le projet (adresse d'écoute, port, chemin du socket sysrepo,
-journalisation ...) ; les valeurs par défaut sont définies dans `config.in`.
+configurer le projet (adresse d'écoute, port, journalisation, etc.) ;
+les valeurs par défaut sont définies dans `config.in`.
 Il est aussi possible de générer une configuration sans interface
 interactive avec `make defconfig`.
+
+> **Note** : Toutes les dépendances sont fournies via l'image Docker.
+> Aucune installation manuelle n'est requise sur le système hôte.
 
 ### Prérequis
 
 Le système de build doit fournir :
 
-- eBuild (le système de construction — présent dans `extern/ebuild/` ou
-  `/usr/share/ebuild/`),
-- GCC (8+) ou Clang,
-- les bibliothèques, compilées et installées :
-  **libyang** (≥ 5.8), **sysrepo** (≥ 5.1), **fcgi2** (`libfcgi`),
-  **stroll**, **utils** (eTux), **libconfig**,
-- `pkg-config` et `kconfig-frontends` (pour `make config`).
+- Docker avec BuildKit (pour construire l'image)
+- eBuild (le système de construction — présent dans `extern/ebuild/`)
+- GCC (8+) ou Clang (dans l'image Docker)
+- les bibliothèques, compilées et installées dans l'image :
+  **fcgi2**, **json-c**, **libyang**, **sysrepo**, **stroll**, **utils** (eTux)
+- `pkg-config` et `kconfig-frontends` (pour `make config` dans l'image)
 
-Ces dépendances peuvent être obtenues deux façons :
+Le dossier `extern/` contient les sources des dépendances utilisées pour :
+- Construire l'image Docker (les bibliothèques y sont compilées et installées)
+- Servir de référence pour les agents IA (code source consultable)
 
-1. **Compiler à la main** les sources de `extern/` sur le système hôte
-   (`make -C docker extern` télécharge les sources ; chaque bibliothèque a
-   sa commande de build respective) ;
-2. **Réutiliser l'image Docker de build** ([docker/](docker/README.md)) :
-   elle contient toutes les dépendances installées, et sert de
-   *système où les libs sont installées* pour CI et agents IA :
-
-   ```sh
-   make -C docker build    # télécharge extern/ + construit l'image
-   make -C docker run      # shell interactif : les libs sont toutes là
-   ```
+> **Important** : le dossier `extern/` est un dossier de sources téléchargées.
+> Il ne fait pas partie du dépôt Git (voir `.gitignore`) et **ne doit jamais
+> être modifié**. Les sources sont téléchargées automatiquement via
+> `make -C docker extern`.
 
 Pour CI et agents IA, le workflow complet (build, test, run) est décrit
 dans [docker/README.md](docker/README.md).
@@ -88,35 +97,10 @@ dans [docker/README.md](docker/README.md).
 
   --help          Aide
   --version       Version
-  --config PATH   Fichier de configuration (format libconfig)
 ```
 
-Le fichier de configuration de référence est
-[`docker/config.cfg`](docker/config.cfg) (syntaxe [libconfig](http://www.cksystem.com/libconfig/)) :
-
-```
-server {
-    host "0.0.0.0";
-    port 8000;
-    transport "tcp";            // "tcp" ou "unix"
-
-    sysrepo {
-        username "sysrepo-mcp";
-        connection_timeout 5000;
-    };
-
-    logging {
-        level "info";           // emerg|alert|crit|err|warning|notice|info|debug
-        use_syslog yes;
-    };
-
-    agent {
-        api_key "";
-        name "openhands-agent";
-        allowed_modules = [ "ietf-interfaces", "ietf-routing" ];
-    };
-};
-```
+Le serveur écoute par défaut sur une socket FastCGI. En production, un
+reverse proxy (lighttpd, nginx) forward les requêtes HTTP vers sysrepo-mcp.
 
 ## Documentation
 
@@ -130,38 +114,42 @@ make doc         # génère doc/ (HTML)
 ## Structure du projet
 
 ```
-├── docker/                 # Environnement de build Docker (CI / agents IA)
-│   ├── Dockerfile          #   image de build (toutes les dépendances)
-│   ├── Makefile            #   cibles build / build-nc / run / test / extern
-│   ├── README.md           #   doc du workflow Docker
-│   └── config.cfg          #   exemple de configuration
+├── docker/                 # Environnement de build Docker
+│   ├── Dockerfile          # image de build (toutes les dépendances)
+│   ├── Makefile            # cibles build / run / test / extern
+│   └── README.md           # doc du workflow Docker
 ├── extern/                 # Sources des dépendances (téléchargées, non versionnées)
-│   ├── ebuild/             #   système de build
-│   ├── utils/              #   utilitaires eTux
-│   ├── stroll/             #   structures de données
-│   ├── fcgi2/              #   FastCGI
-│   ├── libyang/            #   moteur YANG
-│   └── sysrepo/            #   datastore NETCONF
+│   ├── ebuild/             # système de build
+│   ├── utils/              # utilitaires eTux
+│   ├── stroll/             # structures de données
+│   ├── fcgi2/              # FastCGI
+│   ├── libyang/            # moteur YANG
+│   └── sysrepo/            # librairie NETCONF
 ├── include/sysrepo/mcp/    # En-têtes publics
-├── src/                    # Code source
+├── src/                    # Code source (squelette)
 ├── sphinx/                 # Sources de la documentation (Sphinx)
+├── yang/                   # Modèles YANG du projet
+│   └── sysrepo-mcp.yang    # Modèle YANG du serveur sysrepo-mcp
 ├── Makefile                # Point d'entrée du build (ebuild)
 └── ebuild.mk               # Déclaration du binaire
 ```
 
-**Important** : le dossier `extern/` est un dossier de sources téléchargées.
-Il ne fait pas partie du dépôt Git (voir `.gitignore`) et **ne doit jamais
-être modifié**.
+## Limites
+
+- **Pas de SSE** : Server-Sent Events ne sera pas implémenté car incompatible avec
+  le protocole FastCGI utilisé pour le transport.
+- **Transport FastCGI uniquement** : Le serveur est conçu pour fonctionner derrière
+  un reverse proxy (lighttpd, nginx) via FastCGI. Aucun support pour socket Unix
+  ou TCP direct.
 
 ## Sécurité
 
-- Les opérations de l'agent sont validées contre les permissions de
-  `agent.allowed_modules`.
-- Le transport MCP doit être protégé (TLS ou socket restreint).
-- Chaque opération de configuration est journalisée.
+- Les opérations de l'agent **seront** validées contre les permissions de
+  `agent.allowed_modules` (à implémenter).
+- Le transport MCP doit être protégé (TLS au niveau du reverse proxy).
+- Chaque opération de configuration **sera** journalisée (à implémenter).
 
 ## License
 
-Ce projet est distribué sous les termes de la licence LGPL-3.0
-(voir [COPYING.LESSER](COPYING.LESSER)) et la licence BSD 3-Clause
-(voir [COPYING.txt](COPYING.txt)).
+Ce projet est distribué sous les termes de la licence **LGPL-3.0**
+(voir [COPYING.LESSER](COPYING.LESSER)).

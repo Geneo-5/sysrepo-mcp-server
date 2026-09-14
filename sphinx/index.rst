@@ -3,17 +3,14 @@
 Welcome to sysrepo-mcp documentation
 ##########################################
 
-This manual is free software: you can redistribute it and/or modify it under the
-terms of the GNU General Public License as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version.
+sysrepo-mcp is a Model Context Protocol (MCP) server that bridges AI agents
+with sysrepo's NETCONF configuration datastore. This documentation describes
+the architecture, installation, and API of sysrepo-mcp.
 
-This manual is distributed in the hope that it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE. See the GNU General Public License for more details.
+> **Note**: This project is currently a **skeleton**. The documentation describes
+> the target implementation. No functionality is implemented at this stage.
 
-A copy of the license is included in the section entitled
-:ref:`GNU General Public License <gpl>`.
+For license information, see the :ref:`license` section.
 
 .. Caption of toctrees are not translated into latex, hence the dirty trick
 .. below. See https://github.com/sphinx-doc/sphinx/issues/3169 for more infos.
