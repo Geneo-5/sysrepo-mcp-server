@@ -433,18 +433,6 @@ process_mcp_request(const char *request_body)
 }
 
 /******************************************************************************
- * Signal handler
- ******************************************************************************/
-static volatile sig_atomic_t server_stopping = 0;
-
-static void
-signal_handler(int signum)
-{
-    (void)signum; /* Unused parameter */
-    server_stopping = 1;
-}
-
-/******************************************************************************
  * Show help
  ******************************************************************************/
 static void
@@ -457,12 +445,47 @@ show_help(void)
 }
 
 /******************************************************************************
- * Main entry point - FastCGI server
+ * Signal handler
+ ******************************************************************************/
+static volatile sig_atomic_t server_stopping = 0;
+
+static void
+signal_handler(int signum)
+{
+    (void)signum; /* Unused parameter */
+    server_stopping = 1;
+}
+
+/******************************************************************************
+ * Check if running as FastCGI
+ * Returns 1 if FCGX_IsCGI() would succeed, 0 otherwise
+ ******************************************************************************/
+static int
+is_fastcgi_environment(void)
+{
+    /* Check if we're running under FastCGI by looking at environment */
+    const char *fcgi_env = getenv("FCGI_ROLE");
+    if (fcgi_env != NULL) {
+        return 1;
+    }
+    
+    /* Also check for common FastCGI environment variables */
+    if (getenv("GATEWAY_INTERFACE") != NULL ||
+        getenv("REQUEST_METHOD") != NULL ||
+        getenv("QUERY_STRING") != NULL) {
+        return 1;
+    }
+    
+    return 0;
+}
+
+/******************************************************************************
+ * Main entry point
  ******************************************************************************/
 int
 main(int argc, char *argv[])
 {
-    /* Handle command-line options */
+    /* Handle command-line options (CLI mode) */
     if (argc > 1) {
         if (strcmp(argv[1], "--help") == 0) {
             show_help();
@@ -472,6 +495,18 @@ main(int argc, char *argv[])
             printf("sysrepo-mcp " SERVER_VERSION "\n");
             return 0;
         }
+    }
+    
+    /* Check if we're running as FastCGI */
+    if (!is_fastcgi_environment()) {
+        /* Running as standalone CLI - show help and exit */
+        if (argc == 1) {
+            fprintf(stderr, "sysrepo-mcp: This is a FastCGI application.\n");
+            fprintf(stderr, "Run it behind a reverse proxy (lighttpd, nginx) or\n");
+            fprintf(stderr, "use --help or --version for command-line options.\n");
+            return 1;
+        }
+        return 0;
     }
     
     /* Install signal handlers */
@@ -508,7 +543,7 @@ main(int argc, char *argv[])
         if (content_length > 0 && content_length < 1024 * 1024) {
             request_body = malloc(content_length + 1);
             if (request_body) {
-                int nread = fread(request_body, 1, content_length, stdin);
+                int nread = FCGX_GetStr(request_body, content_length, request.in);
                 request_body[nread] = '\0';
             }
         }
