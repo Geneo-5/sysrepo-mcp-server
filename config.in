@@ -1,150 +1,170 @@
 ################################################################################
 # SPDX-License-Identifier: LGPL-3.0-only
 #
-# This file is part of sysrepo-mcp-server.
+# This file is part of sysrepo-mcp.
 # Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
 
 # =============================================================================
 # SERVER
+# Configuration options that affect runtime behavior are in yang/sysrepo-mcp.yang
 # =============================================================================
-
-config STRING
-        default "/mcp"
-
-config INTEGER
-        range 60 86400
-        default 1800
-
-config INTEGER
-        range 1 1024
-        default 64
 
 # =============================================================================
 # FASTCGI TRANSPORT
 # =============================================================================
 
 choice
-        prompt "FastCGI transport mode"
-        default UNIX_SOCKET
+	prompt "FastCGI transport mode"
+	default SYSREPO_MCP_SERVER_TRANSPORT_UNIX
 
-config BOOL
-        prompt "Unix socket (local only)"
-        default y
+	config SYSREPO_MCP_SERVER_TRANSPORT_UNIX
+		bool
+		prompt "Unix socket (local only)"
+		default y
 
-config BOOL
-        prompt "TCP (remote or proxied)"
-        default n
+	config SYSREPO_MCP_SERVER_TRANSPORT_TCP
+		bool
+		prompt "TCP (remote or proxied)"
+		default n
 
 endchoice
 
-config STRING
-        default "/var/run/sysrepo-mcp.sock"
-        depends on UNIX_SOCKET
+config SYSREPO_MCP_SERVER_UNIX_SOCKET_PATH
+	string
+	default "/var/run/sysrepo-mcp.sock"
+	depends on SYSREPO_MCP_SERVER_TRANSPORT_UNIX
+	help
+		Unix socket path for FastCGI (when using Unix socket transport)
 
-config STRING
-        default "127.0.0.1"
-        depends on TCP
+config SYSREPO_MCP_SERVER_TCP_HOST
+	string
+	default "127.0.0.1"
+	depends on SYSREPO_MCP_SERVER_TRANSPORT_TCP
+	help
+		TCP host to bind for FastCGI (when using TCP transport)
 
-config INTEGER
-        range 1 65535
-        default 8080
-        depends on TCP
+config SYSREPO_MCP_SERVER_TCP_PORT
+	int
+	range 1 65535
+	default 8080
+	depends on SYSREPO_MCP_SERVER_TRANSPORT_TCP
+	help
+		TCP port to bind for FastCGI (when using TCP transport)
 
 # =============================================================================
 # ACCESS CONTROL
+# Runtime configuration options are in yang/sysrepo-mcp.yang
 # =============================================================================
 
-config BOOL
-        default y
+config SYSREPO_MCP_SERVER_ACL_ENABLED
+	bool
+	default y
+	help
+		Enable access control (authentication + NACM)
 
 choice
-        prompt "Credential type"
-        default API_KEY_BEARER
+	prompt "Credential type"
+	default SYSREPO_MCP_SERVER_AUTH_BEARER
 
-config BOOL
-        prompt "Authorization: Bearer <key>"
-        default y
+	config SYSREPO_MCP_SERVER_AUTH_BEARER
+		bool
+		prompt "Authorization: Bearer <key>"
+		default y
 
-config BOOL
-        prompt "Cookie <name>=<key>"
-        default n
+	config SYSREPO_MCP_SERVER_AUTH_COOKIE
+		bool
+		prompt "Cookie <name>=<key>"
+		default n
 
 endchoice
 
-config STRING
-        default "mcp_session"
-        depends on COOKIE
+config SYSREPO_MCP_SERVER_COOKIE_NAME
+	string
+	default "mcp_session"
+	depends on SYSREPO_MCP_SERVER_AUTH_COOKIE
+	help
+		Cookie name for session authentication
 
-config STRING
-        default "/etc/sysrepo-mcp/keys"
+config SYSREPO_MCP_SERVER_ACL_ENABLE_NACM
+	bool
+	default y
+	depends on SYSREPO_MCP_SERVER_ACL_ENABLED
+	help
+		Enable sysrepo NACM integration for fine-grained access control
 
-config STRING
-        default "mcp"
+config SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER
+	bool
+	default y
+	depends on SYSREPO_MCP_SERVER_ACL_ENABLED
+	help
+		Enable module-level access filtering
 
-config STRING
-        default "mcp:operators"
+config SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER
+	bool
+	default n
+	depends on SYSREPO_MCP_SERVER_ACL_ENABLED
+	help
+		Enable operation-level access filtering (read vs write)
 
-config BOOL
-        default y
+config SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION
+	bool
+	default n
+	depends on SYSREPO_MCP_SERVER_ACL_ENABLED
+	help
+		Enable write protection for sensitive modules
 
-# =============================================================================
-# ACCESS POLICY
-# =============================================================================
-
-config BOOL
-        default n
-        depends on ACL_ENABLED
-
-config BOOL
-        default y
-        depends on ACL_ENABLED
-
-config BOOL
-        default y
-
-config BOOL
-        default n
-
-config BOOL
-        default n
-
-config BOOL
-        default n
-
-config STRING
-        default ""
+config SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES
+	string
+	default ""
+	help
+		Comma-separated list of allowed YANG modules (empty = all)
 
 # =============================================================================
 # SYSREPO CONNECTION
+# Note: sysrepo is used as a LIBRARY (linked at build time).
+# No daemon socket is needed. Data is accessed directly from filesystem.
+# Runtime connection options are in yang/sysrepo-mcp.yang
 # =============================================================================
 
-config STRING
-        default "/var/run/sysrepo-mcp.sock"
-
-config STRING
-        default "mcp"
-
-config BOOL
-        default y
+config SYSREPO_MCP_SERVER_SYSREPO_DATSTORE_DIR
+	string
+	default "/etc/sysrepo/data"
+	help
+		Path to sysrepo datastore directory
 
 # =============================================================================
 # LOGGING (elog)
 # =============================================================================
 
-config BOOL
-        default y
+config SYSREPO_MCP_SERVER_SYSLOG_ENABLED
+	bool
+	default y
+	help
+		Enable syslog logging via elog library
 
-config INTEGER
-        range 0 7
-        default 6
+config SYSREPO_MCP_SERVER_LOG_LEVEL
+	int
+	range 0 7
+	default 6
+	help
+		Log level (0=emerg, 1=alert, 2=crit, 3=err, 4=warning, 5=notice, 6=info, 7=debug)
 
-config BOOL
-        default n
+config SYSREPO_MCP_SERVER_LOG_VERBOSE
+	bool
+	default n
+	help
+		Enable verbose debugging output
 
-config STRING
-        default "/var/log/sysrepo-mcp.log"
-        depends on !LOG_TO_SYSLOG
+config SYSREPO_MCP_SERVER_LOG_FILE
+	string
+	default "/var/log/sysrepo-mcp.log"
+	depends on !SYSREPO_MCP_SERVER_SYSLOG_ENABLED
+	help
+		Log file path (used when syslog is disabled)
 
-config BOOL
-        default y
+config SYSREPO_MCP_SERVER_LOG_CONSOLE
+	bool
+	default y
+	help
+		Enable console logging (stderr)

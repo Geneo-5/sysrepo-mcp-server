@@ -1,0 +1,89 @@
+module sysrepo-mcp {
+    namespace "urn:sysrepo-mcp:server";
+    prefix sr-mcp;
+
+    import ietf-netconf-nacm {
+        prefix nacm;
+    }
+
+    organization
+        "sysrepo-mcp project";
+
+    contact
+        "Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>";
+
+    description
+        "sysrepo-mcp server YANG module.
+        
+        This module defines API keys and server operational state
+        for the sysrepo-mcp FastCGI server.";
+
+    revision "2026-09-14" {
+        description
+            "Initial revision.";
+    }
+
+    list api-key {
+        key "key";
+        description "List of API keys with associated NACM users.";
+
+        leaf key {
+            type string;
+            description "API key value.";
+        }
+
+        leaf user {
+            type string;
+            description "NACM user associated with this API key (must be a valid ietf-netconf-nacm user).";
+        }
+    }
+
+    container server-state {
+        config false;
+        description "sysrepo-mcp server operational state.";
+
+        leaf version {
+            type string;
+            description "Server version.";
+        }
+
+        leaf uptime-seconds {
+            type uint64;
+            units "seconds";
+            description "Server uptime in seconds.";
+        }
+
+        leaf active-sessions {
+            type uint32;
+            description "Number of currently active MCP sessions.";
+        }
+
+        leaf max-sessions {
+            type uint16;
+            description "Maximum configured concurrent MCP sessions.";
+        }
+
+        list session {
+            key "session-id";
+            config false;
+            description "List of active sessions (only present with detailed query).";
+
+            leaf session-id {
+                type string;
+                description "Unique session identifier.";
+            }
+
+            leaf created {
+                type uint64;
+                units "seconds";
+                description "Session creation timestamp (Unix epoch).";
+            }
+
+            leaf last-activity {
+                type uint64;
+                units "seconds";
+                description "Last activity timestamp (Unix epoch).";
+            }
+        }
+    }
+}
