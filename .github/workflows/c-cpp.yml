@@ -17,10 +17,11 @@ jobs:
       # the documentation. The image layer is the slow part; everything else
       # runs inside it.
       - name: Build the image, the binary and the documentation
-        run: scripts/build-docker.sh --force --doc
-
+        run: make -C docker build
+      - name: Build the image, the binary and the documentation
+        run: scripts/build-docker.sh --doc
       - name: Run the test suite
-        run: scripts/test.sh
+        run: scripts/build-docker.sh --test
 
       # The binary is the deliverable; the documentation is what a reader
       # sees first. Keeping both makes a failure inspectable without
