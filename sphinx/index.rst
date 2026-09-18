@@ -1,21 +1,27 @@
+.. Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
+
 .. include:: <isonum.txt>
 
 Welcome to sysrepo-mcp documentation
-##########################################
+####################################
 
-sysrepo-mcp is a Model Context Protocol (MCP) server that bridges AI agents
-with sysrepo's NETCONF configuration datastore. This documentation describes
-the architecture, installation, and API of sysrepo-mcp.
+sysrepo-mcp is a `Model Context Protocol <https://modelcontextprotocol.io>`_
+(MCP) server that bridges AI agents with the `sysrepo
+<https://github.com/sysrepo/sysrepo>`_ YANG datastore. It exposes sysrepo
+operations (read and edit configuration, read operational state, run RPCs and
+actions, explore YANG schemas) as MCP tools, over a FastCGI transport served by
+a reverse proxy.
 
-> **Note**: This project is currently a **skeleton**. The documentation describes
-> the target implementation. No functionality is implemented at this stage.
+.. warning::
 
-For license information, see the :ref:`license` section.
+   **Work in progress.** The build system, the Docker environment and the
+   documentation describe the target design. The server itself is a partial
+   skeleton: several tools are stubbed and the MCP lifecycle
+   (``initialize`` / ``tools/list``) is not implemented yet. Every section
+   below states explicitly what is implemented and what is planned; the
+   :doc:`todo` appendix tracks the remaining work.
 
-.. Caption of toctrees are not translated into latex, hence the dirty trick
-.. below. See https://github.com/sphinx-doc/sphinx/issues/3169 for more infos.
-.. Basically, we ask the latex backend to generate a \part{} section for each
-.. toctree caption using the `raw' restructuredtext directive.
+For license information, see the :ref:`license` appendix.
 
 .. only:: latex
 
@@ -43,16 +49,17 @@ For license information, see the :ref:`license` section.
 
    api
 
-
-.. We use the latex_appendices setting into conf.py to benefit from native latex
-.. appendices section numbering scheme. As a consequence, there is no need to
-.. generate appendix entries for latex since already requested through the
-.. latex_appendices setting.
-
 .. toctree::
    :maxdepth: 2
    :caption: Appendices
 
    license
    todo
-   genindex
+
+.. only:: html
+
+   Indices
+   =======
+
+   * :ref:`genindex`
+   * :ref:`search`

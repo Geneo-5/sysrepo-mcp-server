@@ -3,111 +3,113 @@
 Architecture
 ============
 
-This chapter describes the architecture of sysrepo-mcp, including its
-placement in the system, communication protocols, and configuration models.
+This chapter describes where sysrepo-mcp sits in a system, how it talks to its
+peers, and how it is configured.
 
-> **Note**: This project is a integration skeleton. No functionality is
-> implemented at this stage. This documentation describes the target
-> architecture and technical choices.
+.. warning::
+
+   Implementation status. The FastCGI transport, the MCP lifecycle, sessions,
+   the sysrepo tools and the notification tools are implemented. **Authentication
+   and NACM are not**, and neither is elog. Do not expose this build to an
+   untrusted agent.
 
 Overview
 --------
 
-sysrepo-mcp is a bridge between the `Model Context Protocol
+sysrepo-mcp bridges the `Model Context Protocol
 <https://modelcontextprotocol.io>`_ (MCP) and `sysrepo
-<https://github.com/sysrepo/sysrepo>`_, a NETCONF configuration library. It
-exposes sysrepo operations as MCP tools that an AI agent can invoke.
+<https://github.com/sysrepo/sysrepo>`_, the YANG datastore behind Netopeer2. It
+exposes datastore operations as MCP tools that an AI agent can invoke.
 
-The server **uses FastCGI for transport** (via the fcgi2 library). This is a
-mandatory design choice. The server communicates with a reverse proxy
-(lighttpd, nginx) that handles HTTP/HTTPS connections and forwards MCP
-requests to sysrepo-mcp via FastCGI.
+Two design decisions shape everything else:
 
-The server links the sysrepo library at build time and accesses the YANG
-datastore files directly through the sysrepo C API (``sr_conn_open_session()``,
-``sr_get_items()``, etc.). **No separate sysrepo daemon (sysrepod) is used**.
+**FastCGI transport.**
+   The server is a FastCGI application. A reverse proxy (lighttpd, nginx)
+   terminates HTTP and TLS and forwards requests over FastCGI. The server never
+   speaks HTTP itself and never listens on a public port.
 
-Architecture Diagram
+**sysrepo as a library.**
+   The sysrepo library is linked into the binary and called directly
+   (``sr_connect()``, ``sr_session_start()``, ``sr_get_data()``, ...). There is
+   no separate daemon: sysrepo has had none since version 2, the
+   ``sysrepo-plugind`` service being an unrelated, optional component.
+
+Architecture diagram
 --------------------
 
 ::
 
-   +-------------+      +---------------+      +-------------+
-   |   AI Agent  |<--->| Reverse Proxy |<--->| sysrepo-mcp |
-   | (OpenHands  |      | (lighttpd)    |      | (FastCGI)   |
-   |  SDK, etc.) |      |               |      +-------------+
-   +-------------+      +---------------+            |
-                                                  v
-                                                 +-------------+
-                                                 |  Sysrepo    |
-                                                 |  Library    |
-                                                 | (linked)    |
-                                                 +------+------+
-                                                        |
-                                                        v
-                                                 +-------------+
-                                                 | YANG Models |
-                                                 | (Datastore) |
-                                                 +-------------+
+   +-------------+       +---------------+       +---------------+
+   |   AI agent  |<----->| Reverse proxy |<----->|  sysrepo-mcp  |
+   | (MCP client)|  HTTP | (lighttpd,    | FastCGI  (this project)|
+   +-------------+  TLS  |  nginx)       |       +-------+-------+
+                         +---------------+               |
+                                                         | linked
+                                                         v
+                                                 +---------------+
+                                                 | libsysrepo    |
+                                                 | + libyang     |
+                                                 +-------+-------+
+                                                         |
+                                     +-------------------+-------------------+
+                                     v                                       v
+                            +-----------------+                    +------------------+
+                            | Repository      |                    | Shared memory    |
+                            | /etc/sysrepo    |                    | /dev/shm         |
+                            | (YANG modules,  |                    | (running DS,     |
+                            |  startup DS)    |                    |  locks, events)  |
+                            +-----------------+                    +------------------+
 
 Components
 ----------
 
-1. **AI Agent**: The client that communicates with sysrepo-mcp via
-   MCP. This could be OpenHands, a custom agent, or any MCP-compatible client.
+1. **AI agent**: any MCP-compatible client.
 
-2. **Reverse Proxy (lighttpd/nginx)**: Handles HTTP/HTTPS connections, TLS
-   termination, and forwards MCP requests to sysrepo-mcp via **FastCGI**.
+2. **Reverse proxy**: terminates HTTP and TLS, applies rate limiting, and
+   forwards the MCP endpoint to the FastCGI socket. It may also spawn the
+   server process itself (lighttpd ``bin-path``).
 
-3. **sysrepo-mcp**: The core application that:
+3. **sysrepo-mcp**: accepts FastCGI requests, parses JSON-RPC 2.0, dispatches
+   MCP methods to tool handlers, calls the sysrepo API, and serialises the
+   result back as JSON-RPC.
 
-   - Accepts FastCGI connections from the reverse proxy
-   - Parses MCP JSON-RPC messages
-   - Calls the sysrepo library directly (``sr_conn_open_session()``,
-     ``sr_get_items()``, ``sr_edit_item()``, etc.)
-   - Returns MCP responses to the agent via FastCGI
+4. **libsysrepo and libyang**: the datastore API and the YANG engine. libyang
+   parses the schemas, validates the data and serialises trees; sysrepo owns
+   the datastores, the locking and the change notifications.
 
-4. **Sysrepo Library**: A C library linked into sysrepo-mcp that provides
-   NETCONF datastore operations. The library accesses YANG model data
-   directly from the filesystem (``/etc/sysrepo/data/``) without a
-   separate daemon process.
+5. **The repository**: sysrepo persists YANG modules and the startup datastore
+   under its repository directory (``/etc/sysrepo`` by default) and keeps the
+   running datastore, locks and event pipes in POSIX shared memory.
 
-5. **YANG Models**: Schema definitions that define the configuration and
-   operational state data accessible through sysrepo.
+.. note::
 
-Communication Protocol
+   Because the running datastore lives in shared memory owned by sysrepo, every
+   process linked against libsysrepo participates in the same locking and
+   notification scheme. The server is *not* reading configuration files
+   directly, and must not be given a repository directory that another sysrepo
+   build does not agree on.
+
+Communication protocol
 ----------------------
 
-The server implements **MCP over FastCGI** transport. FastCGI is a binary
-protocol that allows the reverse proxy to forward HTTP requests to the
-sysrepo-mcp process.
+MCP messages are JSON-RPC 2.0. The MCP Streamable HTTP binding sends them to a
+single endpoint (``/mcp`` here) with HTTP POST.
 
-**Important Limitation**: Server-Sent Events (SSE) **will NOT be implemented**
-because it is incompatible with the FastCGI protocol. All communication occurs
-through standard HTTP GET and POST requests forwarded via FastCGI.
-
-Request Flow
+Request flow
 ~~~~~~~~~~~~
 
-1. The AI agent sends an HTTP POST to the MCP endpoint (e.g. ``/mcp``).
-
-2. The request includes:
-
-   - ``Content-Type: application/json``
-   - JSON-RPC payload with method and parameters
-
-3. The reverse proxy (lighttpd) forwards the request to sysrepo-mcp via FastCGI.
-
-4. sysrepo-mcp processes the request and returns an HTTP response
-   with the MCP result via FastCGI.
-
-5. The reverse proxy forwards the response back to the agent.
+1. The agent POSTs a JSON-RPC message to the MCP endpoint.
+2. The proxy forwards method, headers and body over FastCGI.
+3. sysrepo-mcp authenticates the request, dispatches it, and writes a JSON-RPC
+   response on the FastCGI output stream.
+4. The proxy relays the HTTP response to the agent.
 
 .. code-block:: http
 
    POST /mcp HTTP/1.1
    Host: example.com
    Content-Type: application/json
+   Accept: application/json, text/event-stream
    Authorization: Bearer <api-key>
 
    {
@@ -117,457 +119,438 @@ Request Flow
        "params": {
            "name": "sr_get_config",
            "arguments": {
-               "path": "/ietf-interfaces:interfaces"
+               "xpath": "/oven:oven"
            }
        }
    }
 
-Session Management
-~~~~~~~~~~~~~~~~~~
+Streaming and SSE
+~~~~~~~~~~~~~~~~~
 
-Sessions are managed through HTTP headers and FastCGI environment variables.
-The server maintains session state and associates requests with their
-respective sessions.
-
-- **Session Creation**: First request creates a new session. The server
-  responds with a session identifier.
-
-- **Session Validation**: Subsequent requests must include the session identifier.
-  Invalid or expired session IDs are rejected with HTTP 401.
-
-- **Session TTL**: Sessions idle for longer than a configured timeout
-  are automatically destroyed.
-
-- **Max Sessions**: The server enforces a maximum number of concurrent
-  sessions. New sessions are rejected with HTTP 503 when this limit is reached.
-
-Configuration Models
---------------------
-
-sysrepo-mcp uses a **split configuration model**:
-
-- **Runtime Configuration**: Defined in ``yang/sysrepo-mcp.yang`` (API keys list and server operational state)
-- **Build-time Configuration**: Defined in ``config.in`` via Kconfig (transport, logging, sysrepo paths, access control)
-
-Build-time Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-Build-time configuration is defined in ``config.in`` (Kconfig format) and
-determines the server's capabilities at compile time.
-
-
-Sysrepo Connection
-""""""""""""""""""""""
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 10 60
-
-   * - Option
-     - Default
-     - Description
-   * - ``SYSREPO_MCP_SERVER_SYSREPO_DATSTORE_DIR``
-     - ``"/etc/sysrepo/data"``
-     - Path to sysrepo datastore directory
+sysrepo-mcp answers with ``Content-Type: application/json`` only. It never
+opens a ``text/event-stream`` response and does not implement the
+server-to-client streaming half of the Streamable HTTP binding.
 
 .. note::
 
-   Since sysrepo is a library (not a daemon), there is no socket path to
-   configure. The library accesses datastore files directly from the
-   filesystem. The datastore directory path is configured at build time in ``config.in``.
+   This is a deliberate scope restriction, not a protocol impossibility. The
+   MCP Streamable HTTP binding explicitly allows a server to answer a POST with
+   a single JSON object instead of an SSE stream, so an unmodified client
+   works. FastCGI can in principle carry a long-lived streamed response, but
+   proxy response buffering, the ``max-procs`` process model and the absence of
+   a per-connection event loop make it a poor fit here.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 10 60
+   The practical consequence is that **sysrepo notifications cannot be pushed
+   to the agent**. They are not lost, though: the server subscribes on the
+   agent's behalf, queues what arrives, and hands it over when the agent calls
+   ``sr_notif_poll``. See `Notifications`_ below. Anything requiring genuinely
+   server-initiated messages, including MCP sampling and elicitation, is out
+   of scope for this transport.
 
-   * - Option
-     - Default
-     - Description
-   * - ``SYSREPO_MCP_SERVER_SYSLOG_ENABLED``
-     - ``y``
-     - Enable syslog logging via elog library
-   * - ``SYSREPO_MCP_SERVER_LOG_LEVEL``
-     - ``6``
-     - Log level (0-7, where 6=info)
-   * - ``SYSREPO_MCP_SERVER_LOG_VERBOSE``
-     - ``n``
-     - Enable verbose debugging output
-   * - ``SYSREPO_MCP_SERVER_LOG_CONSOLE``
-     - ``y``
-     - Enable console logging (stderr)
+Sessions
+~~~~~~~~
 
-Authentication Models
----------------------
+*Implemented.* A session is what makes state survive between two requests. It
+holds the notification subscriptions an agent has opened and the queue of
+events waiting to be collected.
 
-sysrepo-mcp will support authentication via API keys (to be implemented).
+- ``initialize`` creates one and returns it in the ``Mcp-Session-Id``
+  response header.
+- Later requests echo that header. An identifier that does not resolve is
+  answered with HTTP 404, which tells the client to re-initialize.
+- ``DELETE`` on the endpoint terminates a session and releases its
+  subscriptions.
+- A session idle longer than ``SYSREPO_MCP_SERVER_SESSION_TTL`` is dropped,
+  and past ``SYSREPO_MCP_SERVER_MAX_SESSIONS`` concurrent sessions
+  ``initialize`` is refused with HTTP 503.
 
-Bearer Token Authentication
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The header is optional. A request without one is served normally, so an agent
+reading a value once does not have to handshake first; only the notification
+tools need a session, and they say so with the ``-32008`` error.
 
-The recommended mode for agent-to-server communication. Clients send an HTTP
-``Authorization: Bearer <key>`` header with each request.
+.. warning::
 
-**Planned Workflow (not yet implemented):**
+   **max-procs must be 1.** A session, its subscriptions and its queue live in
+   the FastCGI process that created them. With several processes, consecutive
+   requests from one agent land in different ones and the session is not
+   found.
 
-1. Agent includes ``Authorization: Bearer <api-key>`` header
-2. Server validates key against the API key list in the YANG datastore (from the YANG configuration (yang/sysrepo-mcp.yang))
-3. If valid, server creates sysrepo session
-4. Request is processed with appropriate permissions
+   This is the main open limitation. The fix is to move the session store out
+   of the process, most likely under
+   ``/sysrepo-mcp:server-state/session`` in the operational datastore, which
+   would give sharing and expiry at once. The subscriptions themselves are
+   harder: a sysrepo subscription belongs to the process that created it, so
+   sharing sessions across workers means one worker receiving events on behalf
+   of the others. See :doc:`todo`, milestone 4.
 
-Cookie-Based Authentication
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Notifications
+~~~~~~~~~~~~~
 
-An alternative mode for browser-based scenarios. Clients send a cookie with
-the API key.
+*Implemented.* Since the transport cannot push, the server pulls on the
+agent's behalf:
 
-**Planned Workflow (not yet implemented):**
+1. ``sr_notif_subscribe`` calls ``sr_notif_subscribe_tree()`` on the session's
+   sysrepo session, with ``SR_SUBSCR_NO_THREAD``.
+2. At the start of every request, before anything else, the server calls
+   ``sr_subscription_process_events()`` on every live subscription. The
+   sysrepo callbacks therefore run on the request thread.
+3. Each callback serialises the notification and appends it to the session's
+   ring buffer.
+4. ``sr_notif_poll`` drains that buffer.
 
-1. Client sends HTTP request with cookie ``mcp_session=<api-key>``
-2. Server validates cookie name against configuration
-3. Server validates key against the API key list in the YANG datastore
-4. If valid, server processes request
+``SR_SUBSCR_NO_THREAD`` is the load-bearing choice. Letting sysrepo call back
+on a thread of its own would mean locking the queue and reasoning about a
+buffer that changes while a response is being built; draining events between
+requests keeps the whole server single-threaded.
 
-.. note::
+The cost is latency and bounded memory: an event is only noticed when the next
+request arrives, and a queue that overflows drops its oldest entries. The
+dropped count is reported by every poll rather than hidden.
 
-   Bearer token authentication is recommended for production deployments.
-   Cookie-based authentication may be implemented for specific use cases.
+Configuration model
+-------------------
 
-Sysrepo NACM Integration
--------------------------
+Configuration is split in two:
 
-When access control is enabled, sysrepo-mcp will integrate with sysrepo's
-`Native Access Control Module (NACM) <https://www.rfc-editor.org/rfc/rfc6536>`_
-to enforce fine-grained access control.
+**Build time**, in ``config.in`` (Kconfig)
+   Transport, credential type, access control switches, repository path,
+   logging, and the session limits: maximum concurrent sessions, idle TTL and
+   notification queue size. Fixed when the binary is compiled. See
+   :doc:`install`.
 
-**Note**: NACM integration is planned but not yet implemented in this skeleton.
-
-Access Control Flow
-~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: text
-
-   Client Request
-       
-   API Key Validation (sysrepo-mcp)
-       
-   Sysrepo Session Creation
-       
-   Request Processing (enforcing NACM rules)
-       
-   Response to Client
-
-FastCGI Transport
-----------------
-
-sysrepo-mcp **requires FastCGI** for transport. The server runs as a FastCGI
-application behind a reverse proxy (lighttpd, nginx). This design choice
-simplifies deployment and leverages existing HTTP infrastructure.
-
-**Production Configuration:**
-
-- lighttpd or nginx accepts HTTP/HTTPS requests
-- Requests are forwarded to sysrepo-mcp via FastCGI
-- TLS is terminated at the reverse proxy
-- No direct TCP or Unix socket support
+**Runtime**, in ``yang/sysrepo-mcp.yang``
+   The API key list, and the server operational state. Read from and written to
+   the sysrepo datastore like any other YANG data, which means it is itself
+   subject to NACM.
 
 .. note::
 
-   **SSE Support**: Server-Sent Events **will NOT be implemented** because
-   the FastCGI protocol does not support bidirectional streaming connections.
-   All MCP communication uses standard HTTP request/response over FastCGI.
+   The session limits are build-time today because the session store is
+   build-time: it is a fixed array in the process. Moving sessions to the
+   datastore, which milestone 4 calls for, is what would let an operator
+   change them without recompiling.
 
-Sysrepo Library Connection
---------------------------
+Authentication
+--------------
 
-sysrepo-mcp links the sysrepo library at build time and uses the sysrepo
-C API directly to perform NETCONF operations.
+.. warning::
 
-Connection Management
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Not implemented. The server currently accepts every request.
 
-- **Session Management**: Each MCP session creates a sysrepo session via
-  ``sr_session_create()``. The session uses the username configured at build time.
-- **Datastore Access**: The library reads/writes YANG data directly from
-  the filesystem (``/etc/sysrepo/data/``).
-- **Error Handling**: Connection failures are handled gracefully with
-  retries and appropriate error messages.
+Bearer token
+~~~~~~~~~~~~
 
-Sysrepo Operations
-~~~~~~~~~~~~~~~~~~~~~~
+The recommended mode. The agent sends ``Authorization: Bearer <api-key>``, and
+the proxy forwards it as the ``HTTP_AUTHORIZATION`` FastCGI parameter.
 
-The server **will expose** the following sysrepo library operations as MCP tools.
-Each tool requires specific parameters from the client.
+1. The server extracts the key from the header.
+2. It looks the key up in ``/sysrepo-mcp:api-key``.
+3. It resolves the associated NACM user name.
+4. It calls ``sr_nacm_set_user()`` on the sysrepo session, so every subsequent
+   operation is evaluated against that user's NACM rules.
+5. A missing or unknown key yields HTTP 401.
 
-**Note**: These operations are planned but not yet implemented in this skeleton.
+.. warning::
 
-Configuration Operations:
+   Storing API keys as cleartext leaves in a datastore means any principal with
+   read access to ``/sysrepo-mcp:api-key`` can impersonate every agent. The
+   YANG module therefore marks the list ``nacm:default-deny-all``, and keys
+   should be stored hashed rather than in the clear. Neither the hashing nor
+   the comparison is implemented yet.
 
-``sr_get_config``
-   Read configuration from a YANG module.
+Cookie
+~~~~~~
 
-   Parameters:
+An alternative for browser-based clients: the key travels in a cookie named
+after ``SYSREPO_MCP_SERVER_COOKIE_NAME``, and is validated identically. Cookie
+credentials are exposed to CSRF; the bearer header is preferred everywhere
+else.
 
-   - ``path`` (string, required): XPath expression to select data nodes (must include module namespace prefix, e.g., ``"/oven:oven"`` for the oven module from ``extern/sysrepo/examples/plugin/oven.yang``)
-   - ``datastore`` (string, optional): Which datastore - ``"running"``,
-     ``"startup"``, or ``"candidate"`` (default: ``"running"``)
-   - ``depth`` (string, optional): How deep to traverse (``"shallow"``,
-     ``"deep"``, ``"children"``)
+NACM
+----
 
-   Returns data in libyang LYD_JSON format (compatible with ``lyd_print_fd`` with ``LYD_JSON``).
-
-``sr_edit_config``
-   Apply configuration changes to a YANG module.
-
-   Parameters:
-
-   - ``config`` (object, required): Configuration data in JSON format (compatible with libyang/sysrepo). Must match the YANG schema structure with module namespace prefixes as JSON keys (e.g., ``{"oven:oven": {"temperature": 180, "turned-on": true}}`` for the oven module from ``extern/sysrepo/examples/plugin/oven.yang``)
-   - ``target`` (string, required): Target datastore (``"running"``,
-     ``"startup"``, ``"candidate"``)
-   - ``xpath`` (string, required): XPath expression to target specific nodes (must include module namespace prefix, e.g., ``"/oven:oven"``)
-
-**Operational Data:**
-
-``sr_get_operational``
-   Read operational state data from the datastore (e.g., oven-state from extern/sysrepo/examples/plugin/oven.yang).
-
-   Parameters:
-
-   - ``xpath`` (string, required): XPath expression selecting the data to
-     retrieve (e.g., ``"/oven:oven-state"``)
-   - ``datastore`` (string, optional): Which datastore (default:
-     ``"operational"``)
-   - ``depth`` (string, optional): Traversal depth
-
-   Returns data in libyang LYD_JSON format (compatible with ``lyd_print_fd`` with ``LYD_JSON``).
-
-**Subscriptions:**
+sysrepo implements the **NETCONF Access Control Model** (NACM), specified in
+:rfc:`8341`, through the ``ietf-netconf-acm`` YANG module.
 
 .. note::
 
-   Subscription features (``sr_subscribe_oper_changes``, ``sr_subscribe_notifs``)
-   may have limited functionality due to FastCGI's request/response model.
-   Real-time notifications would require a different transport (not planned).
+   NACM stands for NETCONF Access Control Model, and its current specification
+   is RFC 8341. RFC 6536 defined the earlier revision and has been obsoleted.
 
-**Module Management:**
+Enforcement is delegated to sysrepo rather than reimplemented:
 
-``sr_module_install``
-   Install a YANG module into the datastore.
+- ``sr_nacm_init()`` once, at startup, on a dedicated session.
+- ``sr_nacm_set_user()`` per request, which switches the session into NACM
+  enforcement for that user.
+- ``sr_nacm_check_operation()`` before running an RPC or action.
+- ``sr_nacm_destroy()`` at shutdown.
 
-   Parameters:
+Access control flow::
 
-   - ``yang_file`` (string, required): Path to the YANG schema file
-   - ``features`` (string, optional): Comma-separated features to enable
-   - ``imports`` (string, optional): Comma-separated import paths
+   FastCGI request
+        |
+        v  extract credential (Bearer or cookie)
+   API key lookup in /sysrepo-mcp:api-key
+        |
+        v  map key -> NACM user name
+   sr_nacm_set_user(session, user)
+        |
+        v  sysrepo evaluates every read/write/exec against ietf-netconf-acm
+   JSON-RPC response, or NACM access-denied error
 
-``sr_module_uninstall``
-   Uninstall a YANG module from the datastore.
+The module allow-list and the write protection declared in ``config.in`` are a
+coarse second layer applied before sysrepo is called at all; they are not a
+replacement for NACM rules.
 
-   Parameters:
+.. warning::
 
-   - ``module_name`` (string, required): Name of the YANG module to remove
+   Not implemented. No NACM call is made today, so the agent inherits the full
+   rights of the system user running the FastCGI process. Do not expose this
+   build to an untrusted agent.
 
-**RPC / Actions:**
-
-``sr_execute_rpc``
-   Execute a raw NETCONF RPC operation.
-
-   Parameters:
-
-   - ``rpc_name`` (string, required): Name of the RPC operation
-   - ``input_params`` (object, optional): RPC input parameters as key-value
-     pairs
-   - ``xpath`` (string, optional): XPath for targeted operations
-
-``sr_action``
-   Execute a YANG action (RPC-style tool defined in a YANG model).
-
-   Parameters:
-
-   - ``module`` (string, required): YANG module containing the action
-   - ``action_name`` (string, required): Action name (e.g. ``"reset-interface"``)
-   - ``input_params`` (object, optional): Action input parameters
-   - ``xpath`` (string, optional): XPath to target specific data nodes
-
-System Status
--------------
-
-The server **will expose** a ``get_status`` tool that returns server health
-information. For operational state data, use ``sr_get_operational`` with the
-``sysrepo-mcp`` YANG module.
-
-**Note**: This feature is planned but not yet implemented.
-
-**get_status**
-   Returns server status information only (no YANG data).
-
-   Parameters:
-
-   - ``verbose`` (boolean, optional): Include detailed session information
-     (default: ``false``).
-
-   Returns:
-
-   - ``version`` (string): Server version
-   - ``uptime_seconds`` (integer): Server uptime in seconds
-   - ``active_sessions`` (integer): Number of active sessions
-   - ``max_sessions`` (integer): Maximum concurrent sessions configured
-   - ``session_ids`` (array of strings, optional): List of active session IDs
-     (only present when ``verbose`` is ``true``)
-
-YANG Tree Explorer
-------------------
-
-The server **will provide** a ``get_tree`` tool to discover the YANG schema
-structure (e.g., from ``yang/sysrepo-mcp.yang`` or ``extern/sysrepo/examples/plugin/oven.yang``), which helps agents construct valid XPath expressions.
-
-**Note**: This feature is planned but not yet implemented.
-
-**get_tree**
-   Returns the YANG schema tree for a module, showing all nodes, lists,
-   keys, and leaf-refs. See ``yang/sysrepo-mcp.yang`` for the server module or ``oven.yang`` for a concrete example.
-
-   Parameters:
-
-   - ``module`` (string, required): YANG module name (e.g., ``"sysrepo-mcp"`` for
-     the server module from ``yang/sysrepo-mcp.yang``, or ``"oven"`` for
-     the oven example from ``extern/sysrepo/examples/plugin/oven.yang``)
-   - ``revision`` (string, optional): Module revision date (default: latest)
-   - ``path`` (string, optional): Sub-path within the module (default: root)
-   - ``with-comments`` (boolean, optional): Include description/mandatory
-     attributes (default: ``false``)
-
-   Returns:
-
-   - ``tree`` (object): Hierarchical representation of the YANG schema
-   - ``nodes`` (array): Flat list of all nodes with their XPath expressions
-   - ``references`` (array): List of module dependencies
-
-YANG Help
----------
-
-The server **will provide** a ``get_help`` tool that returns documentation for
-a specific YANG node or XPath expression (e.g., from ``yang/sysrepo-mcp.yang`` or ``extern/sysrepo/examples/plugin/oven.yang``).
-
-**Note**: This feature is planned but not yet implemented.
-
-**get_help**
-   Returns documentation and usage information for a YANG node or XPath.
-
-   Parameters:
-
-   - ``xpath`` (string, required): XPath expression to query (e.g.,
-     ``"/sysrepo-mcp:server-state/version"`` for the server module from
-     ``yang/sysrepo-mcp.yang``, or ``"/oven:oven/temperature"`` for the oven module from
-     ``extern/sysrepo/examples/plugin/oven.yang``)
-   - ``module`` (string, optional): YANG module name (auto-detected from
-     xpath if not provided)
-
-   Returns:
-
-   - ``path`` (string): The matched XPath
-   - ``node_type`` (string): YANG node type (leaf, container, list, etc.)
-   - ``description`` (string): YANG description statement
-   - ``mandatory`` (boolean): Whether the node is mandatory
-   - ``default_value`` (string, optional): Default value if specified
-   - ``possible_values`` (array, optional): Enum or enumeration values
-   - ``example`` (string, optional): Example usage
-
-Logging with elog
+FastCGI transport
 -----------------
 
-When ``CONFIG_SYSREPO_MCP_SERVER_SYSLOG`` is enabled, sysrepo-mcp **will use**
-the `elog <https://github.com/grgbr/elog>`_ library for syslog management.
+The server runs as a FastCGI responder. Two deployment shapes are supported:
 
-**Note**: elog integration is planned but not yet implemented in this skeleton.
+**Proxy-spawned** (lighttpd ``bin-path``)
+   The proxy starts and supervises the process and hands the listening socket
+   over on descriptor 0. The socket options in ``config.in`` are unused.
+   ``max-procs`` must be 1.
 
-elog provides a command-line argument parser for log configuration, making it
-simple and flexible.
+**Externally started**
+   The server creates its own listening socket, Unix or TCP, from the
+   ``config.in`` options, and the proxy connects to it. This is the shape to
+   use under an init system or in a container.
+
+lighttpd
+~~~~~~~~
+
+.. code-block:: none
+
+   server.modules += ( "mod_fastcgi" )
+
+   fastcgi.server = (
+       "/mcp" => (
+           "sysrepo-mcp" => (
+               "socket"      => "/var/run/sysrepo-mcp.sock",
+               "bin-path"    => "/usr/local/bin/sysrepo-mcp",
+               "check-local" => "disable",
+               "max-procs"   => 1
+           )
+       )
+   )
+
+nginx
+~~~~~
+
+nginx never spawns the application, so the server must already be listening:
+
+.. code-block:: none
+
+   location /mcp {
+       include            fastcgi_params;
+       fastcgi_pass       unix:/var/run/sysrepo-mcp.sock;
+       fastcgi_param      SCRIPT_NAME /mcp;
+       fastcgi_buffering  off;
+   }
 
 .. note::
 
-   Logging configuration details will be added when elog integration is
-   implemented.
+   The FastCGI socket must be reachable and writable by the proxy, and by
+   nobody else. It is the only authentication boundary below the API key.
 
-Deployment Considerations
--------------------------
+sysrepo usage
+-------------
 
-Security Best Practices
-~~~~~~~~~~~~~~~~~~~~~~~
+Connection and session
+~~~~~~~~~~~~~~~~~~~~~~
 
-1. **Enable Access Control**: Always enable access control in production
-   (planned feature).
+- One ``sr_conn_ctx_t`` per process, opened with ``sr_connect()`` at startup
+  and closed with ``sr_disconnect()``.
+- One ``sr_session_ctx_t`` per request, opened with ``sr_session_start()`` and
+  moved between datastores with ``sr_session_switch_ds()``.
+- The datastore of a session is *not* implicit: a session started on
+  ``SR_DS_RUNNING`` keeps answering from the running datastore until it is
+  switched, which is the usual cause of an empty operational read.
 
-2. **Use Bearer Authentication**: Prefer Bearer token authentication over
-   cookie-based authentication (planned feature).
+Data representation
+~~~~~~~~~~~~~~~~~~~
 
-3. **Enable TLS**: Terminate TLS at the reverse proxy (lighttpd) and use
-   HTTPS for all client connections.
+Data crosses the API as libyang trees (``struct lyd_node``), obtained with
+``sr_get_data()`` and serialised with ``lyd_print_mem(..., LYD_JSON, ...)``.
 
-4. **Restrict API Keys**: Use strong, random API keys and rotate them
-   regularly (planned feature).
+.. note::
 
-5. **Configure NACM**: Configure NACM users and permissions appropriately
-   for your deployment (planned feature).
+   The older ``sr_val_t`` array API (``sr_get_items()``, ``sr_set_item()``) is
+   documented upstream as deprecated in favour of ``lyd_node``. It also cannot
+   represent a tree, so rebuilding a JSON document from an ``sr_val_t`` array
+   means re-deriving the hierarchy by hand. New code should use
+   ``sr_get_data()`` and ``sr_edit_batch()``.
 
-6. **Limit Exposed Tools**: Only expose the tools your agents need
-   (planned feature).
+Edits
+~~~~~
 
-Performance Considerations
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+An edit is parsed into a libyang tree, staged, then committed:
 
-1. **Session Management**: Configure session timeout and maximum sessions
-   appropriately for your deployment (planned feature).
+1. ``lyd_parse_data_mem()`` with ``LYD_JSON`` and ``LYD_PARSE_ONLY`` on the
+   ``config`` argument, against the context returned by
+   ``sr_session_acquire_context()``.
+2. ``sr_edit_batch()`` to stage the tree with a default operation
+   (``merge``, ``replace`` or ``none``).
+3. ``sr_apply_changes()`` to validate and commit; ``sr_discard_changes()`` on
+   failure.
 
-2. **Concurrency**: FastCGI handles concurrency via the reverse proxy's worker
-   threads. Tune worker count based on expected load.
+.. note::
 
-3. **Logging**: Use appropriate log levels to minimize overhead (planned
-   feature).
+   ``sr_set_item_str()`` sets a **single node** from its string value. It
+   cannot be given a serialised JSON document, which is what a ``config``
+   argument holds.
 
-Monitoring and Observability
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Tools
+-----
 
-1. **Log Monitoring**: Monitor logs for errors and warnings (planned feature).
+The tool surface is specified in :doc:`api`. Summarised by area:
 
-2. **System Status**: Use the ``get_status`` tool to check server health
-   (planned feature).
+.. list-table::
+   :header-rows: 1
+   :widths: 26 20 54
 
-3. **YANG Explorer**: Use the ``get_tree`` tool to discover the YANG schema
-   structure (planned feature).
+   * - Tool
+     - Status
+     - sysrepo entry point
+   * - ``sr_get_config``
+     - implemented
+     - ``sr_get_data()`` on running/startup/candidate
+   * - ``sr_edit_config``
+     - implemented
+     - ``sr_edit_batch()`` + ``sr_apply_changes()``
+   * - ``sr_delete_config``
+     - implemented
+     - ``sr_delete_item()`` + ``sr_apply_changes()``
+   * - ``sr_get_operational``
+     - implemented
+     - ``sr_session_switch_ds()`` + ``sr_get_data()``
+   * - ``sr_execute_rpc``, ``sr_action``
+     - implemented
+     - ``sr_rpc_send_tree()``
+   * - ``sr_notif_subscribe``
+     - implemented
+     - ``sr_notif_subscribe_tree()``, ``SR_SUBSCR_NO_THREAD``
+   * - ``sr_notif_unsubscribe``
+     - implemented
+     - ``sr_unsubscribe()``
+   * - ``sr_notif_poll``, ``sr_notif_list_subscriptions``
+     - implemented
+     - none, server-local queue
+   * - ``sr_notif_send``
+     - implemented
+     - ``sr_notif_send_tree()``
+   * - ``sr_list_modules``
+     - implemented
+     - ``ly_ctx_get_module_iter()``
+   * - ``sr_module_install``
+     - implemented
+     - ``sr_install_module()``
+   * - ``sr_module_uninstall``
+     - implemented
+     - ``sr_remove_module()``
+   * - ``get_status``
+     - implemented
+     - none, server-local counters
+   * - ``get_tree``
+     - implemented
+     - ``lys_find_path()`` on the session context
+   * - ``get_help``
+     - partial
+     - ``lysc_node`` introspection; no ranges or defaults yet
 
-4. **YANG Help**: Use the ``get_help`` tool to get documentation for specific
-   YANG nodes (planned feature).
+"Partial" means the handler works but does not produce every member the API
+reference documents; what is missing is stated there, tool by tool.
 
-Future Considerations
----------------------
+Logging
+-------
 
-The following features are **NOT planned** for future versions:
+.. warning::
 
-- **SSE Support**: Will NOT be implemented (incompatible with FastCGI)
-- **WebSocket Support**: Will NOT be implemented (incompatible with FastCGI)
-- **Socket-based transport**: Will NOT be implemented (FastCGI only)
+   Not implemented. The current code writes to ``stderr`` with ``fprintf()``.
 
-Features that **may be considered** for future versions:
+`elog <https://github.com/grgbr/elog>`_ is to provide syslog, file and console
+back ends together with a command-line parser for the log configuration. Under
+FastCGI, syslog is the only reliable sink: ``stdout`` belongs to the response
+body, and ``stderr`` is captured by the proxy.
 
-- **Authentication**: Add OAuth2, JWT, and other authentication methods
-- **Encryption**: Add end-to-end encryption for MCP messages
-- **Horizontal Scaling**: Support for multiple server instances behind a
-  load balancer with session affinity
+Two log streams have to stay separate: the server's own log, and the sysrepo
+library log, which is redirected with ``sr_log_set_cb()``.
+
+Deployment
+----------
+
+Security
+~~~~~~~~
+
+1. Terminate TLS at the proxy and publish the endpoint over HTTPS only.
+2. Keep the FastCGI socket private to the proxy user.
+3. Run the server as a dedicated unprivileged user, member of the sysrepo
+   group, never as root, which is also the NACM recovery user.
+4. Turn access control on, and give each agent its own key and NACM user.
+5. Restrict the module allow-list to what the agent genuinely needs.
+6. Rotate keys, and log every configuration change with the key identity that
+   caused it.
+
+Performance
+~~~~~~~~~~~
+
+1. **Concurrency is capped at one process.** ``max-procs`` must stay at 1
+   while sessions are process-local, so requests are serialised. This is the
+   binding constraint on throughput today, and the reason milestone 4 matters
+   beyond correctness.
+2. A sysrepo connection is expensive to open and cheap to reuse; one is kept
+   per process for its lifetime.
+3. Reading a whole module is expensive. Prefer a precise XPath over fetching a
+   subtree and filtering afterwards.
+4. Operational reads may invoke subscriber callbacks in other processes and
+   are bounded by their timeouts.
+5. Notification callbacks run on the request thread, so a wide subscription
+   makes every request do the work of draining it. Filter at subscription
+   time rather than after polling.
+
+Observability
+~~~~~~~~~~~~~
+
+1. ``get_status`` for a liveness probe.
+2. ``sr_get_operational`` on ``/sysrepo-mcp:server-state`` for detail.
+3. The proxy access log for latency and status codes.
+4. syslog for the server and sysrepo library messages.
+
+Out of scope
+------------
+
+Deliberately not planned:
+
+- **SSE and server-initiated messages**: see `Streaming and SSE`_ above. This
+  rules out pushed notifications, MCP sampling and elicitation.
+- **WebSocket transport**: not an MCP binding, and redundant with FastCGI.
+- **A direct HTTP listener**: HTTP, TLS and rate limiting stay in the proxy.
+
+Possible later:
+
+- OAuth2 or JWT credentials, which the MCP authorization specification builds
+  on.
+- Horizontal scaling behind a load balancer, once sessions are shared.
+- Metrics export.
 
 Summary
 -------
 
-This chapter described the architecture of sysrepo-mcp, including its
-placement in the system, communication protocols, and configuration models.
-
-Key points:
-
-- sysrepo-mcp bridges MCP and sysrepo, exposing NETCONF operations as
-  MCP tools
-- The server links the sysrepo library at build time and connects directly
-  to the datastore files, without a separate daemon
-- **FastCGI transport only** via reverse proxy (lighttpd, nginx)
-- **SSE will NOT be implemented** (incompatible with FastCGI)
-- Build-time configuration via Kconfig/Config.in
-- elog will provide enhanced syslog management (planned feature)
-- Access control will integrate with sysrepo NACM (planned feature)
+- sysrepo-mcp exposes sysrepo datastore operations as MCP tools.
+- The transport is FastCGI behind a reverse proxy; responses are plain JSON,
+  with no SSE and therefore no pushed notification. Notifications are queued
+  per session and collected by polling instead.
+- Sessions are identified by ``Mcp-Session-Id`` and live in the FastCGI
+  process, which forces ``max-procs = 1``.
+- sysrepo is linked as a library; there is no daemon, and the running datastore
+  lives in shared memory.
+- Build-time configuration is Kconfig; runtime configuration is YANG.
+- Access control is delegated to sysrepo NACM, keyed by API key, and is **not
+  implemented yet**, as is elog.

@@ -5,220 +5,380 @@ Integration Guide
 
 This chapter describes how to build and install sysrepo-mcp.
 
-> **Note**: This project is a integration skeleton. No functionality is
-> implemented at this stage. The build system is configured but the server
-> code itself is a stub.
+.. warning::
+
+   The build system and the container environment are functional. The server
+   itself is a partial skeleton: it builds a FastCGI binary that dispatches a
+   handful of MCP tools, but the MCP lifecycle, authentication and access
+   control are not implemented. See the :doc:`todo` appendix.
 
 Prerequisites
 -------------
 
-Build requirements (all provided via Docker image):
+Everything is provided by the Docker build image; nothing has to be installed
+on the host beyond:
 
-- Docker with BuildKit
-- eBuild system (extern/ebuild/ or /usr/share/ebuild/)
-- GCC (version 8+) or Clang
-- pkg-config
-- sysrepo library (extern/sysrepo/)
-- libyang (extern/libyang/)
-- fcgi2 library (extern/fcgi2/)
-- json-c library (extern/json-c/)
-- stroll library (extern/stroll/)
-- utils library (extern/utils/)
+- Docker with BuildKit (default on recent versions, check with
+  ``docker buildx version``)
+- GNU make, to drive ``docker/Makefile`` from the host
 
-> **Note**: All dependencies are compiled and installed in the Docker image.
-> No manual installation is required on the host system.
+Inside the image, the build needs:
+
+- GCC 8+ (or Clang), ``pkg-config``, ``kconfig-frontends``
+- eBuild, installed under ``/usr/share/ebuild``
+- ``libyang``, ``sysrepo``, ``fcgi2``, ``stroll``, ``utils``, ``elog``, built
+  from ``extern/`` and installed under ``/usr/local``
+- ``json-c``, from the Debian package ``libjson-c-dev``
+- Sphinx, ``sphinx-rtd-theme``, Breathe, Doxygen and TeX Live, for the
+  documentation
+- Python 3 and pytest, for the test suite
+
+.. note::
+
+   ``extern/`` is a *download destination*, not a source tree. It is excluded
+   from Git (see ``.gitignore``), populated by ``make -C docker extern``, and
+   must never be modified in place. The Dockerfile bind-mounts each library
+   read-only and builds it in a throwaway copy.
 
 Installation Guide
 ------------------
 
-Using Docker (Recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Using Docker (the only supported method)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The **only supported build method** is via Docker. This ensures all dependencies
-are correctly installed and configured.
-
-1. **Build the Docker image**:
+1. **Build the image**. This downloads the ``extern/`` sources, then compiles
+   and installs every dependency into the image:
 
    .. code-block:: bash
 
       make -C docker build
 
-   This command downloads all external sources to ``extern/`` and builds
-the Docker image with all dependencies pre-installed.
+   Or, without the Docker layer cache:
 
-2. **Run the build environment**:
+   .. code-block:: bash
+
+      make -C docker build-nc
+
+2. **Open the build environment**. The working copy is bind-mounted, so the
+   sources stay in the host checkout:
 
    .. code-block:: bash
 
       make -C docker run
 
-   This opens an interactive shell inside the build image with the project
-   mounted at ``/home/builder/project``.
-
-3. **Configure the build** (optional):
+3. **Configure the build** (optional). Options are declared in ``config.in``
+   and are all *build-time* options:
 
    .. code-block:: bash
 
-      make config      # Opens menuconfig for Kconfig configuration
+      make config   # interactive Kconfig interface (menuconfig)
 
-   or::
+   or, to accept every default without any interaction:
 
-      make defconfig   # Generates default configuration without interactive UI
+   .. code-block:: bash
 
-   Configuration options are defined in ``config.in`` and include:
+      make defconfig
 
-   - Listen address and port for FastCGI
-   - Sysrepo username and timeout
-   - Logging level and verbosity
-
-4. **Build the project**:
+4. **Build**:
 
    .. code-block:: bash
 
       make
 
-   This compiles the sysrepo-mcp binary to ``build/sysrepo-mcp``.
+   The binary lands in ``build/sysrepo-mcp``.
 
 5. **Install** (optional):
 
    .. code-block:: bash
 
-      sudo make install
+      make install PREFIX=/usr/local
 
-   This installs the binary to ``/usr/local/bin/sysrepo-mcp``.
-
-6. **Clean build artifacts**:
+6. **Clean**:
 
    .. code-block:: bash
 
       make clean
 
+Everything above can also be driven from the host with a single script, which
+wraps the same targets in a ``docker run``:
+
+.. code-block:: bash
+
+   scripts/build-docker.sh              # build the binary
+   scripts/build-docker.sh --doc        # build the binary and all the docs
+   scripts/build-docker.sh --doc-html   # HTML documentation only
+   scripts/build-docker.sh --test       # build, then run the test suite
+   scripts/build-docker.sh --force      # re-download extern/ and rebuild the image
+
+.. note::
+
+   Rebuilding the image is slow and rarely needed: the ``extern/`` libraries
+   change only when their pinned versions in ``docker/Makefile`` change. Use
+   ``--force`` only after bumping a dependency, editing the ``Dockerfile``, or
+   changing a system package.
+
+Building the documentation
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The eBuild documentation targets produce, from ``sphinx/``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Target
+     - Output
+   * - ``make doc``
+     - Everything below
+   * - ``make html``
+     - ``build/doc/html/index.html``
+   * - ``make pdf``
+     - ``build/doc/pdf/sysrepo-mcp.pdf``
+   * - ``make info``
+     - ``build/doc/info/sysrepo-mcp.info``
+   * - ``make man``
+     - ``build/doc/man/``
+
+Doxygen extracts the public headers of ``include/`` into
+``sphinx/_doxygen/xml``; ``sphinx/conf.py`` enables Breathe only when that
+directory exists, so ``sphinx-build`` also works without running Doxygen first.
+
 Configuration Options
 ---------------------
 
-The following configuration options are available in ``config.in`` (Kconfig format).
-Use ``make config`` (menuconfig) or ``make defconfig`` to set these options.
+All options below are declared in ``config.in`` (Kconfig format) and are fixed
+at compile time. Runtime configuration, namely the API keys, lives in the
+``sysrepo-mcp`` YANG module (see :doc:`architecture`).
 
-Server Configuration
-~~~~~~~~~~~~~~~~~~~~
+In the generated header, every symbol is prefixed with ``CONFIG_``; for
+instance ``SYSREPO_MCP_SERVER_LOG_LEVEL`` is used from C as
+``CONFIG_SYSREPO_MCP_SERVER_LOG_LEVEL``.
 
-``SYSREPO_MCP_SERVER_MCP_PATH``
-   MCP endpoint path (URL path for FastCGI). Default: ``"/mcp"``
+Sessions and notifications
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``SYSREPO_MCP_SERVER_SESSION_TTL``
-   Session timeout in seconds (idle sessions are destroyed after this time).
-   Range: 60-86400. Default: ``1800``
+.. list-table::
+   :header-rows: 1
+   :widths: 40 15 45
 
-``SYSREPO_MCP_SERVER_MAX_SESSIONS``
-   Maximum number of concurrent MCP sessions. Range: 1-1024. Default: ``64``
+   * - Option
+     - Default
+     - Description
+   * - ``SYSREPO_MCP_SERVER_MAX_SESSIONS``
+     - ``64``
+     - Concurrent MCP sessions (1-1024). Past it, ``initialize`` returns
+       HTTP 503.
+   * - ``SYSREPO_MCP_SERVER_SESSION_TTL``
+     - ``1800``
+     - Seconds of inactivity before a session, its subscriptions and its
+       queued notifications are destroyed (60-86400).
+   * - ``SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE``
+     - ``256``
+     - Notifications buffered per session between two polls (8-65536).
 
-FastCGI Transport
-~~~~~~~~~~~~~~~~
+.. warning::
 
-``SYSREPO_MCP_SERVER_TRANSPORT_UNIX``
-   Enable Unix socket transport (for local connections). Default: ``y``
+   These are build-time because the session store is a fixed array in the
+   process. That also means the FastCGI configuration **must** use
+   ``max-procs = 1``: with more, a session created by one worker is invisible
+   to the next request. See :doc:`architecture`.
 
-``SYSREPO_MCP_SERVER_TRANSPORT_TCP``
-   Enable TCP transport (for remote or proxied connections). Default: ``n``
+FastCGI transport
+~~~~~~~~~~~~~~~~~
 
-``SYSREPO_MCP_SERVER_UNIX_SOCKET_PATH``
-   Unix socket path for FastCGI. Default: ``"/var/run/sysrepo-mcp.sock"``
-   (Only used when ``SYSREPO_MCP_SERVER_TRANSPORT_UNIX=y``)
+.. list-table::
+   :header-rows: 1
+   :widths: 40 15 45
 
-``SYSREPO_MCP_SERVER_TCP_HOST``
-   TCP host to bind for FastCGI. Default: ``"127.0.0.1"``
-   (Only used when ``SYSREPO_MCP_SERVER_TRANSPORT_TCP=y``)
+   * - Option
+     - Default
+     - Description
+   * - ``SYSREPO_MCP_SERVER_TRANSPORT_UNIX``
+     - ``y``
+     - Listen on a Unix socket. Mutually exclusive with the TCP choice.
+   * - ``SYSREPO_MCP_SERVER_TRANSPORT_TCP``
+     - ``n``
+     - Listen on a TCP socket instead.
+   * - ``SYSREPO_MCP_SERVER_UNIX_SOCKET_PATH``
+     - ``/var/run/sysrepo-mcp.sock``
+     - Socket path, when the Unix transport is selected.
+   * - ``SYSREPO_MCP_SERVER_TCP_HOST``
+     - ``127.0.0.1``
+     - Bind address, when the TCP transport is selected.
+   * - ``SYSREPO_MCP_SERVER_TCP_PORT``
+     - ``8080``
+     - Bind port (1-65535), when the TCP transport is selected.
 
-``SYSREPO_MCP_SERVER_TCP_PORT``
-   TCP port to bind for FastCGI. Range: 1-65535. Default: ``8080``
-   (Only used when ``SYSREPO_MCP_SERVER_TRANSPORT_TCP=y``)
+.. note::
 
-Sysrepo Connection
+   These options describe where the server listens for *FastCGI* connections
+   coming from the reverse proxy. They are not an HTTP listener: HTTP is
+   terminated by the proxy.
+
+   When the proxy spawns the server itself (lighttpd ``bin-path``), the socket
+   is handed over on descriptor 0 and these options are unused.
+
+Access control
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 15 45
+
+   * - Option
+     - Default
+     - Description
+   * - ``SYSREPO_MCP_SERVER_ACL_ENABLED``
+     - ``y``
+     - Master switch for authentication and NACM.
+   * - ``SYSREPO_MCP_SERVER_AUTH_BEARER``
+     - ``y``
+     - Read the credential from ``Authorization: Bearer <key>``.
+   * - ``SYSREPO_MCP_SERVER_AUTH_COOKIE``
+     - ``n``
+     - Read the credential from a cookie instead.
+   * - ``SYSREPO_MCP_SERVER_COOKIE_NAME``
+     - ``mcp_session``
+     - Cookie name, when the cookie credential is selected.
+   * - ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``
+     - ``y``
+     - Bind the session to a NACM user (``sr_nacm_set_user()``).
+   * - ``SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER``
+     - ``y``
+     - Restrict the reachable YANG modules.
+   * - ``SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER``
+     - ``n``
+     - Distinguish read from write when filtering.
+   * - ``SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION``
+     - ``n``
+     - Refuse every write on the modules flagged as sensitive.
+   * - ``SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES``
+     - ``""``
+     - Comma-separated module allow-list; empty means every module.
+
+.. warning::
+
+   None of the access control options are enforced yet. Building with
+   ``SYSREPO_MCP_SERVER_ACL_ENABLED=y`` currently grants an agent the same
+   rights as the user the server runs as.
+
+sysrepo repository
 ~~~~~~~~~~~~~~~~~~
 
-``SYSREPO_MCP_SERVER_SYSREPO_USERNAME``
-   Username used when creating sysrepo sessions (``sr_session_create()``).
-   Default: ``"mcp"``
+.. list-table::
+   :header-rows: 1
+   :widths: 40 15 45
 
-``SYSREPO_MCP_SERVER_SYSREPO_TIMEOUT``
-   Sysrepo operation timeout in milliseconds. Range: 1000-60000. Default: ``5000``
+   * - Option
+     - Default
+     - Description
+   * - ``SYSREPO_MCP_SERVER_SYSREPO_DATASTORE_DIR``
+     - ``/etc/sysrepo``
+     - Repository directory used by the linked sysrepo library.
 
-``SYSREPO_MCP_SERVER_SYSREPO_DATSTORE_DIR``
-   Path to sysrepo datastore directory. Default: ``"/etc/sysrepo/data"``
+.. note::
 
-Logging Configuration
-~~~~~~~~~~~~~~~~~~~~~~
+   sysrepo resolves its repository path at *its own* compile time
+   (``-DREPO_PATH``), and honours the ``SYSREPO_REPOSITORY_PATH`` environment
+   variable at runtime. This option only controls what sysrepo-mcp exports in
+   that variable before connecting; it cannot move a repository that sysrepo
+   was built to use elsewhere.
 
-``SYSREPO_MCP_SERVER_SYSLOG_ENABLED``
-   Enable syslog logging via elog library. Default: ``y``
+Logging
+~~~~~~~
 
-``SYSREPO_MCP_SERVER_LOG_LEVEL``
-   Log level (0=emerg, 1=alert, 2=crit, 3=err, 4=warning, 5=notice, 6=info, 7=debug).
-   Range: 0-7. Default: ``6``
+.. list-table::
+   :header-rows: 1
+   :widths: 40 15 45
 
-``SYSREPO_MCP_SERVER_LOG_VERBOSE``
-   Enable verbose debugging output. Default: ``n``
+   * - Option
+     - Default
+     - Description
+   * - ``SYSREPO_MCP_SERVER_SYSLOG_ENABLED``
+     - ``y``
+     - Log to syslog through elog.
+   * - ``SYSREPO_MCP_SERVER_LOG_FILE``
+     - ``/var/log/sysrepo-mcp.log``
+     - Log file, when syslog is disabled.
+   * - ``SYSREPO_MCP_SERVER_LOG_LEVEL``
+     - ``6``
+     - Syslog severity, 0 (emerg) to 7 (debug).
+   * - ``SYSREPO_MCP_SERVER_LOG_VERBOSE``
+     - ``n``
+     - Extra debugging output.
+   * - ``SYSREPO_MCP_SERVER_LOG_CONSOLE``
+     - ``y``
+     - Also log to ``stderr``.
 
-``SYSREPO_MCP_SERVER_LOG_CONSOLE``
-   Enable console logging (stderr). Default: ``y``
+.. warning::
+
+   Under FastCGI, ``stderr`` is captured by the web server and ends up in its
+   error log. Console logging is therefore only useful when the process is
+   started by the proxy; it is not a substitute for syslog.
 
 Usage
 -----
 
-Start the server (after building):
-
 .. code-block:: bash
 
-   ./build/sysrepo-mcp [--help] [--version]
+   sysrepo-mcp [--help] [--version]
 
-The ``--help`` option prints a help message and exits. The ``--version`` option
-prints the version number and exits.
+``--help`` prints a usage summary and exits, ``--version`` prints the version
+and exits. With no argument the process expects to be started as a FastCGI
+application by a web server and exits with an error otherwise.
 
-> **Note**: The server currently only prints help/version. All MCP functionality
-> is planned but not yet implemented in this skeleton.
+See :doc:`architecture` for the reverse proxy configuration.
 
-Dependencies Details
---------------------
-
-The following libraries are used by sysrepo-mcp:
+Dependencies
+------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 15 65
+   :widths: 18 14 20 48
 
    * - Library
      - Version
+     - Origin
      - Purpose
-   * - **fcgi2**
-     - 2.4.7
-     - FastCGI transport (mandatory)
-   * - **json-c**
-     - 0.16+
-     - JSON parsing/generation for MCP messages
+   * - **eBuild**
+     - master
+     - ``extern/``
+     - Makefile build framework (build only, not linked)
    * - **libyang**
      - 5.8.6
-     - YANG schema parsing and validation
+     - ``extern/``
+     - YANG schema and data tree engine
    * - **sysrepo**
      - 5.1.0
-     - NETCONF datastore API (library mode)
+     - ``extern/``
+     - YANG datastore API
+   * - **fcgi2**
+     - 2.4.7
+     - ``extern/``
+     - FastCGI transport (``libfcgi``), mandatory
    * - **stroll**
      - master
+     - ``extern/``
      - Data structures (lists, hashes, buffers)
    * - **utils**
      - master
-     - eTux utilities (file, network, thread, etc.)
-   * - **ebuild**
+     - ``extern/``
+     - eTux utilities (file, network, thread)
+   * - **elog**
      - master
-     - Build system (Makefile framework)
+     - ``extern/``
+     - Logging (syslog, file, rotation)
+   * - **json-c**
+     - Debian ``libjson-c-dev``
+     - system package
+     - JSON-RPC parsing and generation
 
-> **Important**: All dependencies are provided via the Docker image.
-> The ``extern/`` directory contains source references for IA agents and
-> is used to build the Docker image. It is excluded from Git and must never
-> be modified manually.
+The pinned versions live in ``docker/Makefile``; libyang 5.8.6 and sysrepo
+5.1.0 are the pair used together by Netopeer2 2.8.7.
 
 License
 -------
 
-This project is licensed under the terms of the GNU Lesser General Public
-License version 3 (LGPL-3.0). A copy of the license is available in the
-:ref:`license` appendix section.
+sysrepo-mcp is distributed under the GNU Lesser General Public License,
+version 3. See the :ref:`license` appendix, which also lists the licenses of
+the third-party libraries above.

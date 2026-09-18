@@ -1,66 +1,113 @@
 .. Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 
+.. _license:
+
 License
 =======
 
-sysrepo-mcp is licensed under the **GNU Lesser General Public License version 3.0** (LGPL-3.0).
+sysrepo-mcp is licensed under the **GNU Lesser General Public License, version
+3.0** (LGPL-3.0-only).
 
-.. include:: ../COPYING.LESSER.txt
-   :literal:
+The LGPL-3.0 is version 3 of the GNU General Public License supplemented by a
+set of additional permissions. Both texts ship with the source tree:
 
-This license allows you to:
+``COPYING.txt``
+   The GNU General Public License, version 3.
 
-- Use the software for any purpose
-- Modify the source code
-- Distribute modified versions
-- Link with the library (including proprietary software)
+``COPYING.LESSER``
+   The additional permissions that turn the above into the GNU Lesser General
+   Public License, version 3.
 
-Subject to the following conditions:
+Every source file carries an ``SPDX-License-Identifier: LGPL-3.0-only`` tag.
 
-- You must retain copyright notices
-- You must provide source code when distributing modified versions
-- Any modifications must be clearly marked
+.. note::
 
-The full text of the LGPL-3.0 license is included above from the
-``COPYING.LESSER.txt`` file in the project root.
-
-For more information about the LGPL-3.0 license, please visit:
-https://www.gnu.org/licenses/lgpl-3.0.html
+   The summary below is informal and is **not** legal advice. Only the license
+   texts shipped with the source tree are authoritative.
 
 Why LGPL-3.0?
---------------
+-------------
 
-The LGPL-3.0 license was chosen because:
+1. **Library friendly**: an application may link against sysrepo-mcp,
+   including a proprietary one, as long as the user keeps the ability to
+   relink against a modified version of the library.
 
-1. **Library-Friendly**: Allows linking with proprietary applications while
-   still requiring modifications to the library itself to be open source.
+2. **Copyleft on the library itself**: changes made to sysrepo-mcp remain
+   available to its users.
 
-2. **Compatibility**: Ensures compatibility with the sysrepo and libyang
-   libraries, which are also licensed under LGPL.
+3. **Compatible with the dependency stack**: the libraries sysrepo-mcp links
+   against are distributed under permissive licenses (see below), which the
+   LGPL-3.0 can incorporate.
 
-3. **Freedom**: Provides the freedoms to use, modify, and distribute while
-   protecting the core library code.
+Third-party licenses
+--------------------
 
-Compliance
----------
+sysrepo-mcp links against, but does not include, the following libraries. Their
+licenses apply to the corresponding binaries and must be honoured when
+redistributing a build.
 
-To comply with LGPL-3.0 requirements:
+.. list-table::
+   :header-rows: 1
+   :widths: 20 25 55
 
-- Include a copy of the LGPL-3.0 license with any distribution
-- Provide access to the corresponding source code for any modified versions
-- Retain all copyright notices
-- Clearly document any modifications made to the library
+   * - Library
+     - License
+     - Note
+   * - libyang
+     - BSD-3-Clause
+     - YANG schema and data engine.
+   * - sysrepo
+     - BSD-3-Clause
+     - YANG datastore API.
+   * - json-c
+     - MIT
+     - JSON-RPC message parsing and generation.
+   * - fcgi2
+     - FastCGI open-market license
+     - FastCGI transport (``libfcgi``).
+   * - stroll, utils, elog
+     - LGPL-3.0
+     - eTux support libraries.
+   * - eBuild
+     - GPL-3.0
+     - Build system only; not linked into the binary.
 
-If you use sysrepo-mcp as a library in your application, you must:
+.. note::
 
-- Provide a way for users to obtain and install the source code
-- Allow users to replace the library with a modified version
-- Not impose additional restrictions on users' rights
+   sysrepo and libyang are **not** LGPL: they moved to BSD-3-Clause. They can
+   therefore be combined with LGPL-3.0 code without further constraints, but
+   their copyright and license notices must be preserved in a redistribution.
 
-If you modify sysrepo-mcp itself and distribute it, you must:
+Compliance checklist
+--------------------
 
-- License your modifications under LGPL-3.0
-- Provide complete source code
-- Document the changes made
+When distributing sysrepo-mcp, in binary or source form:
 
-See the full LGPL-3.0 license text above for complete legal details.
+- Ship a copy of ``COPYING.txt`` and ``COPYING.LESSER``.
+- Keep every copyright notice and SPDX tag intact.
+- Document the changes made to sysrepo-mcp, and license them under LGPL-3.0.
+- Provide the corresponding source, or a written offer to obtain it.
+- Ship the license notices of the third-party libraries listed above.
+
+When linking sysrepo-mcp into a larger application:
+
+- Let users relink the application against a modified sysrepo-mcp, for example
+  by using shared libraries or by shipping the object files.
+- Do not impose terms that restrict the rights the LGPL-3.0 grants.
+
+License text
+------------
+
+The full text of the additional permissions that define the LGPL-3.0:
+
+.. include:: ../COPYING.LESSER
+   :literal:
+
+The full text of the GNU General Public License version 3, which the above
+supplements:
+
+.. include:: ../COPYING.txt
+   :literal:
+
+The canonical version of both documents is published at
+https://www.gnu.org/licenses/lgpl-3.0.html.

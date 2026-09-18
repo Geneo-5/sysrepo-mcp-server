@@ -1,79 +1,69 @@
 #!/bin/bash
+################################################################################
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# ==============================================================================
-# sysrepo-mcp -- Docker test runner
+# This file is part of sysrepo-mcp.
+# Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
+################################################################################
 #
-# Spins up the sysrepo-mcp *build environment* image and runs
-# `make test` inside it (which builds the project and runs the test suite).
+# Run the test suite inside the build container.
 #
-# The image (built by scripts/build.sh) is a build environment only: it holds
-# every build & runtime dependency (the extern/ libraries, lighttpd, ...) but
-# does NOT contain the compiled project. That happens here, at run time, on
-# the bind-mounted working directory.
+#   scripts/test.sh                 # everything
+#   scripts/test.sh -k oven         # a pytest filter
+#   scripts/test.sh tests/test_oven.py::test_full_oven_session
 #
-# Usage:
-#   scripts/test.sh [test-filter]
+# Every argument is passed straight to pytest.
 #
-#   test-filter : optional argument passed to pytest to select tests, e.g.
-#                 scripts/test.sh test_config   # single file
-#                 scripts/test.sh -k "auth"     # keyword filter
+# The suite starts and stops lighttpd and the oven plugin itself, in a private
+# sysrepo repository under the pytest temporary directory, so this script has
+# nothing to orchestrate: it only provides the container.
 #
-# ==============================================================================
+################################################################################
+
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Paths and configuration
-# ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-IMAGE_NAME="sysrepo-mcp-builder"
-IMAGE_TAG="${IMAGE_NAME}:latest"
-BUILD_CONTEXT="$PROJECT_ROOT"
-DOCKERFILE="$PROJECT_ROOT/docker/Dockerfile"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# ---------------------------------------------------------------------------
-# 1. Locate the image
-# ---------------------------------------------------------------------------
-if ! docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
-    echo "Image $IMAGE_TAG not found. Building it now..."
-    docker build -t "$IMAGE_TAG" -f "$DOCKERFILE" "$BUILD_CONTEXT"
+DOCKER_IMAGE="${DOCKER_IMAGE:-sysrepo-mcp}"
+DOCKER_TAG="${DOCKER_TAG:-latest}"
+IMAGE="${DOCKER_IMAGE}:${DOCKER_TAG}"
+
+# Port 80 by default, matching docker/lighttpd.conf and the documentation.
+TEST_PORT="${SYSREPO_MCP_TEST_PORT:-80}"
+
+log() { echo "==> $*"; }
+
+if ! docker info >/dev/null 2>&1; then
+    echo "Docker is not running. Start it and try again." >&2
+    exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# 2. Start sysrepo-mcp + lighttpd in a single container
-# ---------------------------------------------------------------------------
-echo "Starting test container with sysrepo-mcp + lighttpd..."
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    log "Image $IMAGE not found, building it ..."
+    make -C "${PROJECT_DIR}/docker" build
+fi
 
-# Start a single container running both sysrepo-mcp and lighttpd in background,
-# then exec bash. The container stays alive until explicitly stopped.
-docker run -d --name sysrepo-mcp-test \
+if [ ! -x "${PROJECT_DIR}/build/sysrepo-mcp" ]; then
+    log "Binary missing, building it ..."
+    "${SCRIPT_DIR}/build-docker.sh"
+fi
+
+log "Running the test suite in $IMAGE (port ${TEST_PORT}) ..."
+
+# The project is mounted at the same absolute path inside the container so
+# that every path pytest prints means the same thing on both sides.
+#
+# --network none is deliberately NOT used: lighttpd binds 127.0.0.1 inside the
+# container's own namespace, and the default bridge already isolates it from
+# the host.
+docker run --rm \
     -u "$(id -u):$(id -g)" \
-    -v "${PROJECT_ROOT}:${PROJECT_ROOT}" \
-    -w "${PROJECT_ROOT}" \
-    "${IMAGE_TAG}:${DOCKER_TAG}" \
-    bash -c "sysrepo-mcp > /dev/null 2>&1 & lighttpd -f /etc/lighttpd/lighttpd.conf > /dev/null 2>&1 & sleep 2 && exec bash"
+    -v "${PROJECT_DIR}:${PROJECT_DIR}" \
+    -w "${PROJECT_DIR}" \
+    -e "SYSREPO_MCP_TEST_PORT=${TEST_PORT}" \
+    -e "HOME=/tmp" \
+    "$IMAGE" \
+    python3 -m pytest tests -v "$@"
 
-# Wait for servers to be ready
-sleep 2
-
-# ---------------------------------------------------------------------------
-# 3. Run `make test` inside the same container
-# ---------------------------------------------------------------------------
-cd "$PROJECT_ROOT"
-
-if [ $# -gt 0 ]; then
-    echo "Running: make test $* (in container)"
-    docker exec sysrepo-mcp-test make test "$@"
-else
-    echo "Running: make test (in container)"
-    docker exec sysrepo-mcp-test make test
-fi
-
-# ---------------------------------------------------------------------------
-# 4. Cleanup: stop test container
-# ---------------------------------------------------------------------------
-echo "Stopping test container..."
-docker stop sysrepo-mcp-test >/dev/null 2>&1 || true
-docker rm sysrepo-mcp-test >/dev/null 2>&1 || true
-
-echo "Test complete."
+log "Tests complete."

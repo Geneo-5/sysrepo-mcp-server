@@ -131,12 +131,23 @@ build-nc: $(LIBYANG_DIR) $(SYSREPO_DIR) $(EBUILD_DIR) $(STROLL_DIR) $(UTILS_DIR)
 	docker build --no-cache -t "$(DOCKER_IMAGE):$(DOCKER_TAG)" -f "$(DOCKERFILE)" "$(DOCKER_CONTEXT)"
 	@echo "==> Docker image built: $(DOCKER_IMAGE):$(DOCKER_TAG)"
 
+# The project root, as an absolute path on the host. It is bind-mounted at the
+# same path inside the container so that every path printed by the compiler,
+# by pytest or by a debugger means the same thing on both sides.
+PROJECTDIR := $(abspath $(CURDIR)/..)
+
+# $$(id -u) and not $(id -u): the latter is expanded by make, which knows no
+# variable of that name, and yields an empty `-u ":"'.
+DOCKER_RUN := docker run --rm -u "$$(id -u):$$(id -g)" \
+              -v "$(PROJECTDIR):$(PROJECTDIR)" -w "$(PROJECTDIR)"
+
 run:
 	@echo "==> Running Docker container interactively ..."
-	docker run --rm -it -u "$(id -u):$(id -g)" -v "$$PWD":/home/builder/project "$(DOCKER_IMAGE):$(DOCKER_TAG)" bash
+	$(DOCKER_RUN) -it "$(DOCKER_IMAGE):$(DOCKER_TAG)" bash
 
+# scripts/test.sh runs on the HOST: it is the thing that creates the
+# container. Running it through DOCKER_RUN would nest one docker run inside
+# another, where the docker client is not available.
 test: build
-	@echo "==> Running build + test in container ..."
-	docker run --rm -u "$(id -u):$(id -g)" -v "$$PWD":/home/builder/project "$(DOCKER_IMAGE):$(DOCKER_TAG)" \\
-		/home/builder/project/scripts/test.sh
-	@echo "==> Build + test complete!"
+	@echo "==> Running the test suite ..."
+	"$(PROJECTDIR)/scripts/test.sh"

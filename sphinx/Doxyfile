@@ -1,59 +1,99 @@
 ################################################################################
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: LGPL-3.0-only
 #
 # This file is part of sysrepo-mcp-server.
 # Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
-
-# Doxygen configuration file for sysrepo-mcp-server
-# Generated from extern/stroll/sphinx/Doxyfile template
+#
+# Doxygen configuration for sysrepo-mcp-server.
+#
+# Doxygen is used here only as an XML front-end for Breathe: it parses the
+# public headers of include/ and emits XML that sphinx/conf.py picks up when
+# sphinx/_doxygen/xml exists. No HTML, LaTeX or RTF output is produced.
+#
+# Run from the project root:
+#     VERSION=x.y doxygen sphinx/Doxyfile
+#
+################################################################################
 
 PROJECT_NAME           = "sysrepo-mcp-server"
 PROJECT_NUMBER         = $(VERSION)
+PROJECT_BRIEF          = "MCP server bridging AI agents and the sysrepo datastore"
+
 OUTPUT_DIRECTORY       = sphinx/_doxygen
+OUTPUT_LANGUAGE        = English
 
-CREATE_PDF             = NO
-PDF_HYPERLINKS         = NO
-USE_PDFLATEX           = No
+################################################################################
+# Input
+################################################################################
 
-HTML_OUTPUT            = _doxygen
-HTML_HEADER            =
-HTML_FOOTER            =
-HTML_STYLESHEET        =
-
-GENERATE_LATEX         = NO
-
-CORRECT_LINKING        = YES
-IGNORE_PREFIX           = 
-EXTRACT_ALL            = YES
-EXTRACT_PRIVATE        = NO
-EXTRACT_STATIC         = YES
-EXTRACT_LOCAL_CLASSES  = YES
-EXTRACT_LOCAL_METHODS  = YES
-EXTRACT_PRIV_STATIC    = NO
-HIDE_SCOPE_NAMES       = NO
-
-INPUT                  = ../include
-RECURSIVE              = YES
+INPUT                  = include
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.h
-RECURSIVE_FILTER       = 0
+RECURSIVE              = YES
 
-SOURCE_BROWSER         = NO
-GENERATE_TREEVIEW      = NO
-GENERATE_DOCUMENTATION = YES
-GENERATE_HTMLHELP      = NO
-GENERATE_QHP           = NO
-GENERATE_RTF           = NO
-RTF_HYPERLINKS         = NO
-LATEX_OUTPUT           = 
+# Strip the leading include/ from the paths shown in the generated XML.
+STRIP_FROM_PATH        = include
+
+################################################################################
+# Extraction
+################################################################################
+
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_LOCAL_CLASSES  = YES
+HIDE_SCOPE_NAMES       = NO
+
+OPTIMIZE_OUTPUT_FOR_C  = YES
+TYPEDEF_HIDES_STRUCT   = YES
+
+################################################################################
+# Output formats
+#
+# Only XML, for Breathe. Everything else is produced by Sphinx.
+################################################################################
+
+GENERATE_XML           = YES
 XML_OUTPUT             = xml
 XML_PROGRAMLISTING     = NO
-WARN_FORMAT            = "$file:$line: $text"
-WARN_LOGFILE           = 
-WARN_NO_PARAMDOC       = YES
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_RTF           = NO
+GENERATE_MAN           = NO
+GENERATE_DOCBOOK       = NO
+GENERATE_HTMLHELP      = NO
+GENERATE_QHP           = NO
+
+SOURCE_BROWSER         = NO
+
+################################################################################
+# Preprocessing
+#
+# The Kconfig symbols of config.in reach the sources as CONFIG_* macros. They
+# are defined here so that doxygen parses every branch of a conditional
+# declaration rather than the one a given build happens to select.
+################################################################################
+
 ENABLE_PREPROCESSING   = YES
-PREDEFINED             = CONFIG_SYSREPO_MCP_SERVER_SYSLOG=\
-                       CONFIG_SYSREPO_MCP_SERVER_VERBOSE=0
 MACRO_EXPANSION        = YES
-EXPAND_ONLY_PREDEFINED = NO
+EXPAND_ONLY_PREDEFINED = YES
+
+PREDEFINED             = CONFIG_SYSREPO_MCP_SERVER_ACL_ENABLED=1 \
+                         CONFIG_SYSREPO_MCP_SERVER_ACL_ENABLE_NACM=1 \
+                         CONFIG_SYSREPO_MCP_SERVER_AUTH_BEARER=1 \
+                         CONFIG_SYSREPO_MCP_SERVER_SYSLOG_ENABLED=1 \
+                         CONFIG_SYSREPO_MCP_SERVER_LOG_VERBOSE=0 \
+                         CONFIG_SYSREPO_MCP_SERVER_TRANSPORT_UNIX=1
+
+################################################################################
+# Diagnostics
+################################################################################
+
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_FORMAT            = "$file:$line: $text"

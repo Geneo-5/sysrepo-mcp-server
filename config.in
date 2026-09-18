@@ -10,6 +10,40 @@
 # Configuration options that affect runtime behavior are in yang/sysrepo-mcp.yang
 # =============================================================================
 
+config SYSREPO_MCP_SERVER_MAX_SESSIONS
+	int
+	range 1 1024
+	default 64
+	help
+		Maximum number of concurrent MCP sessions.
+
+		Past this number, initialize is refused with HTTP 503. Each
+		session carries its notification subscriptions and its
+		notification queue, so this bounds the memory the server can
+		be made to hold.
+
+config SYSREPO_MCP_SERVER_SESSION_TTL
+	int
+	range 60 86400
+	default 1800
+	help
+		Seconds of inactivity after which a session is destroyed,
+		along with its subscriptions and its pending notifications.
+
+		A client whose session expired gets HTTP 404 and is expected
+		to call initialize again.
+
+config SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE
+	int
+	range 8 65536
+	default 256
+	help
+		Notifications buffered per session between two polls.
+
+		When the queue is full the oldest entry is dropped and the
+		count is reported by sr_notif_poll, so an agent polling too
+		slowly is told rather than silently missing events.
+
 # =============================================================================
 # FASTCGI TRANSPORT
 # =============================================================================
@@ -121,17 +155,25 @@ config SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES
 		Comma-separated list of allowed YANG modules (empty = all)
 
 # =============================================================================
-# SYSREPO CONNECTION
-# Note: sysrepo is used as a LIBRARY (linked at build time).
-# No daemon socket is needed. Data is accessed directly from filesystem.
-# Runtime connection options are in yang/sysrepo-mcp.yang
+# SYSREPO REPOSITORY
+# Note: sysrepo is used as a LIBRARY (linked at build time). There has been no
+# sysrepo daemon since version 2, so there is no daemon socket to configure.
+# The repository holds the YANG modules and the startup datastore; the running
+# datastore lives in POSIX shared memory, not in a file.
+# Runtime options are in yang/sysrepo-mcp.yang
 # =============================================================================
 
-config SYSREPO_MCP_SERVER_SYSREPO_DATSTORE_DIR
+config SYSREPO_MCP_SERVER_SYSREPO_DATASTORE_DIR
 	string
-	default "/etc/sysrepo/data"
+	default "/etc/sysrepo"
 	help
-		Path to sysrepo datastore directory
+		sysrepo repository directory, exported as
+		SYSREPO_REPOSITORY_PATH before connecting.
+
+		Note that sysrepo resolves this path at its own compile time
+		(-DREPO_PATH) and only honours the environment variable as an
+		override. This option cannot move a repository that the linked
+		sysrepo build does not agree on.
 
 # =============================================================================
 # LOGGING (elog)

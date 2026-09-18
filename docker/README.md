@@ -39,11 +39,14 @@ upstream URLs:
 |---------|---------|---------|
 | ebuild  | master  | Build system |
 | libyang | 5.8.6   | YANG schema parsing |
-| sysrepo | 5.1.0   | NETCONF datastore API |
+| sysrepo | 5.1.0   | YANG datastore API |
 | stroll  | master  | Data structures |
 | utils   | master  | eTux utilities |
+| elog    | master  | Logging |
 | fcgi2   | 2.4.7   | FastCGI transport (required) |
-| json-c  | 0.16    | JSON parsing |
+
+json-c does not come from `extern/`: it is the Debian package
+`libjson-c-dev`, installed in the image.
 
 > **Note** : The `extern/` directory contains source references for agents.
 > These libraries are compiled and installed in the Docker image at `/usr/local`.
@@ -73,16 +76,28 @@ make            # build the project
 ## Test
 
 ```sh
-# Build the image, then run `make test` in the container
-# (smoke tests the binary + runs tests/ if present)
+# Build the image if needed, then run the suite in the container
 make -C docker test
 ```
 
-A filter can be passed to the pytest suite:
+Or directly, which is the same thing with arguments:
 
 ```sh
-make -C docker test test_config
+scripts/test.sh                                   # everything
+scripts/test.sh -k oven                           # a pytest filter
+scripts/test.sh tests/test_oven.py                # one file
 ```
+
+The suite drives the server the way a client does: HTTP to lighttpd on port
+80, forwarded over FastCGI. It starts lighttpd and the upstream oven plugin
+itself, in a private sysrepo repository under the pytest temporary directory,
+so it leaves nothing behind and never touches the system repository.
+
+If port 80 is unavailable, set `SYSREPO_MCP_TEST_PORT`.
+
+> Binding port 80 as a non-root user works because Docker sets
+> `net.ipv4.ip_unprivileged_port_start=0` inside containers. On a host where
+> that is not true, use another port.
 
 ## Clean
 

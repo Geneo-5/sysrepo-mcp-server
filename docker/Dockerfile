@@ -30,8 +30,8 @@ ENV LDFLAGS="-Wl,-z,relro,-z,now"
 # 1. System packages
 # ----------------------------------------------------------------------------
 # These cover the dependencies of every extern/ library and of the project
-# itself (libconfig for the configuration parser, python3/pytest for the test
-# suite, lighttpd as the background HTTP server, plus debugging tools).
+# itself (json-c for the JSON-RPC layer, python3/pytest for the test suite,
+# lighttpd as the background HTTP server, plus debugging tools).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         # Base / build essentials
@@ -39,13 +39,14 @@ RUN apt-get update && \
         g++ \
         make \
         gcc \
+        gcc-aarch64-linux-gnu \
         libc6-dev \
         autoconf \
         automake \
-        automake.1.16 \
         libtool \
         m4 \
         pkg-config \
+        git \
         kconfig-frontends \
         python3-pip \
         # Download / archive tools (needed by some extern build systems)
@@ -66,14 +67,13 @@ RUN apt-get update && \
         libpcre2-dev \
         zlib1g-dev \
         libssl-dev \
-        libjson-c-dev \
         libcurl4-openssl-dev \
         libhiredis-dev \
         libnghttp2-dev \
         doxygen \
-        # Configuration file parser (the project)
-        libconfig-dev \
-        # Python test runner
+        # JSON-RPC message parsing (the project)
+        libjson-c-dev \
+        # Python test runner (the suite uses the standard library only)
         python3 \
         python3-pytest \
         # HTTP server running in the background
@@ -92,6 +92,10 @@ RUN apt-get update && \
         texinfo \
         graphviz \
     && rm -rf /var/lib/apt/lists/*
+
+# NOTE: libconfig-dev is deliberately absent. The project has no runtime
+# configuration file: build-time options are Kconfig (config.in) and runtime
+# options are YANG (yang/sysrepo-mcp.yang). See sphinx/todo.rst.
     # Refresh TeX path database so that kpsewhich finds .sty in /usr/share/texmf
 RUN texhash 2>/dev/null || true && \
     updmap-sys --syncwithtrees 2>/dev/null || true
@@ -145,7 +149,11 @@ RUN --mount=type=bind,source=extern/sysrepo,target=/src/sysrepo,readonly \
         -DBUILD_TESTING=OFF \
         -DSR_MSG_INTERNAL=ON && \
     cmake --build /build/sysrepo -j$(nproc) && \
-    cmake --install /build/sysrepo
+    cmake --install /build/sysrepo && \
+    ldconfig && \
+    sysrepoctl -i /src/sysrepo/examples/plugin/oven.yang && \
+    sysrepo-plugind -P /build/sysrepo/examples/oven.so && \
+    rm -rf /dev/shm/*
 
 # --- 2.4 fcgi2 2.4.7 (FastCGI) -----------------------------------------------
 # The vendored git snapshot ships no pre-generated configure script, so it is
@@ -163,30 +171,35 @@ RUN --mount=type=bind,source=extern/fcgi2,target=/src/fcgi2,readonly \
     make -j$(nproc) && \
     make install
 
-ENV PKG_CONFIG_PATH=/usr/lib/pkgconfig
+# libyang, sysrepo and fcgi2 install under /usr/local, the eTux libraries under
+# /usr. Both prefixes must stay searchable: overwriting PKG_CONFIG_PATH with
+# /usr/lib/pkgconfig alone hides libyang.pc and sysrepo.pc, and `pkg-config
+# --libs sysrepo` then silently returns nothing.
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+
 # --- 2.5 stroll (data structures) --------------------------------------------
 RUN --mount=type=bind,source=extern/stroll,target=/src/stroll,readonly \
     cp -a /src/stroll /build/stroll-src && \
     cd /build/stroll-src && \
-    make PREFIX=/usr BUILDDIR=/build/stroll defconfig && \
-    make PREFIX=/usr BUILDDIR=/build/stroll -j$(nproc) && \
-    make PREFIX=/usr BUILDDIR=/build/stroll install
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/stroll defconfig && \
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/stroll build && \
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/stroll install
 
 # --- 2.6 utils (eTux utilities) ----------------------------------------------
 RUN --mount=type=bind,source=extern/utils,target=/src/utils,readonly \
     cp -a /src/utils /build/utils-src && \
     cd /build/utils-src && \
-    make PREFIX=/usr BUILDDIR=/build/utils defconfig && \
-    make PREFIX=/usr BUILDDIR=/build/utils -j$(nproc) && \
-    make PREFIX=/usr BUILDDIR=/build/utils install
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/utils defconfig && \
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/utils build && \
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/utils install
 
 # --- 2.7 elog (syslog utilities) ----------------------------------------------
 RUN --mount=type=bind,source=extern/elog,target=/src/elog,readonly \
     cp -a /src/elog /build/elog-src && \
     cd /build/elog-src && \
-    make PREFIX=/usr BUILDDIR=/build/elog defconfig && \
-    make PREFIX=/usr BUILDDIR=/build/elog -j$(nproc) && \
-    make PREFIX=/usr BUILDDIR=/build/elog install
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/elog defconfig && \
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/elog build && \
+    make EXTRA_CFLAGS="${CFLAGS}" EXTRA_LDFLAGS="${LDFLAGS}" PREFIX=/usr BUILDDIR=/build/elog install
 
 # Refresh the dynamic linker cache for the freshly installed libraries.
 RUN ldconfig

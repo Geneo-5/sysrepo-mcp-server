@@ -8,13 +8,16 @@
 srcdir := src
 srctop := $(TOPDIR)/$(srcdir)
 
+################################################################################
+# Binary
+################################################################################
+
 bins                   += $(PACKAGE)
 $(PACKAGE)-objs        := $(srcdir)/main.o
 main.o-src             := $(srctop)/main.c
-$(PACKAGE)-cflags      := -I$(TOPDIR)/include \
-                          -DPACKAGE_NAME='"$(PACKAGE)"' \
-                          -DPACKAGE_VERSION='"$(VERSION)"'
-$(PACKAGE)-ldflags     := $(shell pkg-config --libs json-c sysrepo 2>/dev/null) -lfcgi
+$(PACKAGE)-cflags      := $(EXTRA_CFLAGS)
+$(PACKAGE)-ldflags     := $(EXTRA_LDFRAGS) -ljson-c
+$(PACKAGE)-pkgconf     := libyang sysrepo fcgi libstroll libelog libutils
 
 
 ################################################################################
@@ -30,16 +33,17 @@ sphinxsrc  := $(TOPDIR)/sphinx
 # Testing
 ##############################################################################
 #
-# `make test` :
+# `make test' :
 #   1. builds the sysrepo-mcp binary,
 #   2. runs the pytest suite in tests/ (if present).
 #
-# The test suite communicates with the server through the FastCGI socket.
-# The binary is NOT called directly (--help/--version) because
-# `fcgi_stdio.h` intercepts stdout/stderr at link time.
+# The suite talks to the server the way a client does, over the FastCGI socket
+# or through lighttpd. The binary is never invoked directly to probe its
+# behaviour: it is a FastCGI responder, and running it from a terminal only
+# proves that it refuses to run from a terminal.
 #
-# Library paths point at the libraries installed by the container (see
-# docker/Dockerfile : installed under /usr/local).
+# Library paths point at the libraries the container installs under
+# /usr/local (see docker/Dockerfile).
 #
 PYTEST ?= python3 -m pytest
 TESTS  ?= tests
@@ -50,8 +54,8 @@ test: build
 		echo "==> Running test suite ($(PYTEST)) ..."; \
 		PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$$PKG_CONFIG_PATH" \
 		LD_LIBRARY_PATH="/usr/local/lib:$$LD_LIBRARY_PATH" \
+		SYSREPO_MCP_BIN="$(BUILDDIR)/$(PACKAGE)" \
 		$(PYTEST) -v "$(TESTS)" || exit 1; \
 	else \
 		echo "==> No $(TESTS)/ directory found, nothing to test."; \
 	fi
-

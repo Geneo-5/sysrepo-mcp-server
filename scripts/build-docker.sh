@@ -183,18 +183,18 @@ docker run --rm -u "${DOCKER_UID}" \
     -v "${PROJECT_DIR}:${PROJECT_DIR}" \
     -w "${PROJECT_DIR}" \
     "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-    make 2>&1 | grep -v "avertissement" | grep -v "can't cd" | grep -v "ModuleNotFoundError" | grep -v "Traceback" || true
+    make
 
 log_info "Build complete. Binary: ${PROJECT_DIR}/build/sysrepo-mcp"
 
 # Step 5: Smoke test (if requested)
 if [ "$TEST" -eq 1 ]; then
     log_info "Running smoke tests..."
-    docker run --rm -u "${DOCKER_UID}" \
+    docker run --rm \
         -v "${PROJECT_DIR}:${PROJECT_DIR}" \
         -w "${PROJECT_DIR}" \
         "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-        make test 2>&1 | grep -v "avertissement" | grep -v "can't cd" | grep -v "ModuleNotFoundError" | grep -v "Traceback" || true
+        make test
 fi
 
 log_info "Done."

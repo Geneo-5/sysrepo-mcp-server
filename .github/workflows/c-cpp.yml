@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: CI
 
 on:
   push:
@@ -7,11 +7,30 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
-
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: scripts/docker build-docker.sh --doc --test
+      - uses: actions/checkout@v4
+
+      # Downloads extern/, builds the image, compiles the binary and builds
+      # the documentation. The image layer is the slow part; everything else
+      # runs inside it.
+      - name: Build the image, the binary and the documentation
+        run: scripts/build-docker.sh --doc
+
+      - name: Run the test suite
+        run: scripts/test.sh
+
+      # The binary is the deliverable; the documentation is what a reader
+      # sees first. Keeping both makes a failure inspectable without
+      # reproducing the build locally.
+      - name: Upload the build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: |
+            build/sysrepo-mcp
+            build/doc/html
+          if-no-files-found: warn

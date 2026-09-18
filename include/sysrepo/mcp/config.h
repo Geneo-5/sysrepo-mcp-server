@@ -5,10 +5,29 @@
  * Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
  ******************************************************************************/
 
-#ifndef SYSREPO_MCP_CONFIG_H
-#define SYSREPO_MCP_CONFIG_H
+/**
+ * @file
+ * @brief Build-time identity of the package.
+ *
+ * PACKAGE_NAME and PACKAGE_VERSION are normally injected by the build system
+ * (see the -D flags in ebuild.mk, which derive them from VERSION in the
+ * top-level Makefile). The fallbacks below only matter when a translation
+ * unit is compiled outside that build, for instance by an editor's language
+ * server; they must never hardcode a version number that the build could
+ * contradict.
+ */
 
-/* Package version */
-#define PACKAGE_VERSION "0.1.0"
+#ifndef _SYSREPO_MCP_CONFIG_H
+#define _SYSREPO_MCP_CONFIG_H
 
-#endif /* SYSREPO_MCP_CONFIG_H */
+#ifndef PACKAGE_NAME
+/** Package name, normally supplied by the build system. */
+#define PACKAGE_NAME "sysrepo-mcp"
+#endif /* !PACKAGE_NAME */
+
+#ifndef PACKAGE_VERSION
+/** Package version, normally supplied by the build system. */
+#define PACKAGE_VERSION "0.0.0-unknown"
+#endif /* !PACKAGE_VERSION */
+
+#endif /* !_SYSREPO_MCP_CONFIG_H */
