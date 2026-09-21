@@ -69,8 +69,22 @@ mcp_code_from_sr(int rc)
 	case SR_ERR_NOT_FOUND:
 		return MCP_ERR_NOT_FOUND;
 	case SR_ERR_INVAL_ARG:
+		/* An invalid argument to sysrepo can mean two things: the
+		 * caller passed wrong-typed arguments to the API (MCP_ERR_PARAMS),
+		 * or the data they submitted violates a schema constraint
+		 * (MCP_ERR_VALIDATION).  Leave the base mapping as validation;
+		 * mcp_err_from_session() restores MCP_ERR_PARAMS when the
+		 * message says "expected" (API misuse) rather than
+		 * "does not satisfy" (data validation). */
+		return MCP_ERR_VALIDATION;
 	case SR_ERR_LY:
-		return MCP_ERR_PARAMS;
+		/* libyang can return SR_ERR_LY for two distinct reasons:
+		 * "cannot resolve" (the path does not exist in the schema)
+		 * which is MCP_ERR_NOT_FOUND, and "does not satisfy" (range,
+		 * type, mandatory leaf) which is MCP_ERR_VALIDATION.  Leave
+		 * the base mapping as MCP_ERR_VALIDATION; mcp_err_from_session()
+		 * restores MCP_ERR_NOT_FOUND when the message says so. */
+		return MCP_ERR_VALIDATION;
 	case SR_ERR_VALIDATION_FAILED:
 	case SR_ERR_EXISTS:
 		return MCP_ERR_VALIDATION;
@@ -136,6 +150,19 @@ mcp_err_from_session(struct mcp_err *err, sr_session_ctx_t *sess, int rc,
 	snprintf(err->message, sizeof(err->message), "%s", sr_strerror(rc));
 	snprintf(err->detail, sizeof(err->detail), "%s: %s", what,
 		 msg ? msg : sr_strerror(rc));
+
+	/* "cannot resolve" means the target path does not exist in the schema;
+	 * the original MCP_ERR_NOT_FOUND set by the caller is correct but gets
+	 * overwritten by mcp_code_from_sr(SR_ERR_LY).  Restore it. */
+	if (msg != NULL && strstr(msg, "cannot resolve") != NULL)
+		err->code = MCP_ERR_NOT_FOUND;
+
+	/* "Expected" (a value was expected) or "Unexpected" (malformed input)
+	 * means the API call itself was wrong, not the data.  Restore
+	 * MCP_ERR_PARAMS. */
+	if (msg != NULL &&
+	    (strstr(msg, "Expected") != NULL || strstr(msg, "Unexpected") != NULL))
+		err->code = MCP_ERR_PARAMS;
 }
 
 /* ----------------------------------------------------------------- tree_to_json

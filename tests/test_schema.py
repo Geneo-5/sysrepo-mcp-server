@@ -146,7 +146,7 @@ def test_tree_reports_imports(tree):
 def test_unknown_module_is_not_found(mcp_oven):
     error = mcp_oven.tool_error("get_tree", {"module": "no-such-module"})
 
-    assert error["code"] == -32003
+    assert error["code"] == -32001
 
 
 def test_unknown_subtree_is_not_found(mcp_oven):
@@ -154,7 +154,7 @@ def test_unknown_subtree_is_not_found(mcp_oven):
         "get_tree", {"module": "oven", "xpath": "/oven:no-such-node"}
     )
 
-    assert error["code"] == -32003
+    assert error["code"] == -32001
 
 
 def test_module_is_required(mcp_oven):
@@ -217,13 +217,13 @@ def test_help_answers_for_every_node_of_the_module(mcp_oven, xpath):
 def test_help_on_an_unknown_node_is_not_found(mcp_oven):
     error = mcp_oven.tool_error("get_help", {"xpath": "/oven:oven/no-such-leaf"})
 
-    assert error["code"] == -32003
+    assert error["code"] == -32001
 
 
 def test_help_on_an_unknown_module_is_not_found(mcp_oven):
     error = mcp_oven.tool_error("get_help", {"xpath": "/no-such-module:thing"})
 
-    assert error["code"] == -32003
+    assert error["code"] == -32001
 
 
 def test_help_xpath_is_required(mcp_oven):

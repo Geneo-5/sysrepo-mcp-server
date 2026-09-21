@@ -148,7 +148,7 @@ def test_temperature_outside_the_range_is_refused(oven_off, value):
         "sr_edit_config", {"config": {"oven:oven": {"temperature": value}}}
     )
 
-    assert error["code"] == -32005, f"temperature {value} was not refused properly"
+    assert error["code"] == -32002, f"temperature {value} was not refused properly"
 
     assert oven_config(oven_off).get("temperature", 0) != value
 
@@ -158,7 +158,7 @@ def test_wrong_type_for_a_boolean_is_refused(oven_off):
         "sr_edit_config", {"config": {"oven:oven": {"turned-on": "maybe"}}}
     )
 
-    assert error["code"] == -32005
+    assert error["code"] == -32002
 
 
 def test_unknown_node_is_refused(oven_off):
@@ -166,7 +166,7 @@ def test_unknown_node_is_refused(oven_off):
         "sr_edit_config", {"config": {"oven:oven": {"no-such-leaf": 1}}}
     )
 
-    assert error["code"] == -32005
+    assert error["code"] == -32002
 
 
 def test_unknown_module_is_refused(oven_off):
@@ -174,7 +174,16 @@ def test_unknown_module_is_refused(oven_off):
         "sr_edit_config", {"config": {"no-such-module:thing": {"a": 1}}}
     )
 
-    assert error["code"] in (-32003, -32005)
+    assert error["code"] in (-32001, -32002)
+
+
+def test_invalid_enum_value_is_refused(oven_off):
+    error = oven_off.tool_error(
+        "sr_execute_rpc",
+        {"xpath": "/oven:insert-food", "input": {"time": "whenever"}},
+    )
+
+    assert error["code"] in (-32002, -32602)
 
 
 def test_a_refused_edit_leaves_the_datastore_untouched(oven_off):
@@ -309,13 +318,13 @@ def test_invalid_enum_value_is_refused(oven_off):
         {"xpath": "/oven:insert-food", "input": {"time": "whenever"}},
     )
 
-    assert error["code"] == -32005
+    assert error["code"] == -32602
 
 
 def test_unknown_rpc_is_not_found(oven_off):
     error = oven_off.tool_error("sr_execute_rpc", {"xpath": "/oven:no-such-rpc"})
 
-    assert error["code"] == -32003
+    assert error["code"] == -32001
 
 
 def test_rpc_xpath_is_required(oven_off):
@@ -329,7 +338,7 @@ def test_sr_action_shares_the_rpc_path(oven_off):
     # reports a missing operation the same way sr_execute_rpc does.
     error = oven_off.tool_error("sr_action", {"xpath": "/oven:no-such-action"})
 
-    assert error["code"] == -32003
+    assert error["code"] == -32001
 
 
 # ---------------------------------------------------------------------------

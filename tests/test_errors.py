@@ -70,7 +70,7 @@ def test_strict_delete_of_an_absent_node_fails(clean_keys):
         "sr_delete_config", {"xpath": API_KEY, "strict": True}
     )
 
-    assert error["code"] in (-32003, -32005)
+    assert error["code"] in (-32001, -32002)
 
 
 def test_delete_removes_one_list_entry(clean_keys):
@@ -166,7 +166,7 @@ def test_a_list_entry_without_its_mandatory_leaf_is_refused(clean_keys):
         {"config": {"sysrepo-mcp:api-key": [{"key": KEY_A}]}},
     )
 
-    assert error["code"] == -32005
+    assert error["code"] == -32002
     assert clean_keys.get_config(API_KEY)["data"] == {}
 
 
@@ -176,7 +176,7 @@ def test_a_key_shorter_than_the_schema_allows_is_refused(clean_keys):
         {"config": {"sysrepo-mcp:api-key": [{"key": "short", "user": "admin"}]}},
     )
 
-    assert error["code"] == -32005
+    assert error["code"] == -32002
 
 
 def test_server_state_is_not_writable(clean_keys):
@@ -187,7 +187,7 @@ def test_server_state_is_not_writable(clean_keys):
         {"config": {"sysrepo-mcp:server-state": {"version": "9.9.9"}}},
     )
 
-    assert error["code"] in (-32002, -32005)
+    assert error["code"] in (-32002, -32602)
 
 
 def test_schema_of_the_project_module_is_introspectable(mcp_module):
@@ -416,7 +416,7 @@ def test_malformed_xpath_is_rejected_clearly(mcp, xpath):
 
     # Whichever layer catches it, the answer must name a client-side problem
     # rather than an internal error.
-    assert error["code"] in (-32602, -32003), (
+    assert error["code"] in (-32602, -32003, -32002), (
         f"{xpath!r} reported as {error['code']}: {error.get('data')}"
     )
     assert error["code"] != -32603

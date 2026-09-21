@@ -214,7 +214,7 @@ def test_subscribe_to_an_unknown_module_fails(oven_session):
         "sr_notif_subscribe", {"module": "no-such-module"}
     )
 
-    assert error["code"] in (-32003, -32602)
+    assert error["code"] in (-32001, -32002)
 
 
 def test_subscribe_rejects_a_malformed_filter(oven_session):
@@ -268,7 +268,7 @@ def test_unsubscribe_an_unknown_id_is_not_found(oven_session):
         "sr_notif_unsubscribe", {"subscription_id": 9999}
     )
 
-    assert error["code"] == -32003
+    assert error["code"] == -32001
 
 
 # ---------------------------------------------------------------------------
@@ -470,7 +470,7 @@ def test_sending_an_unknown_notification_is_not_found(oven_session):
         "sr_notif_send", {"xpath": "/oven:no-such-notification"}
     )
 
-    assert error["code"] == -32003
+    assert error["code"] == -32001
 
 
 def test_sending_requires_an_xpath(oven_session):

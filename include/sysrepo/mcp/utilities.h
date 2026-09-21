@@ -78,7 +78,7 @@
 
 /** No session: the session identifier is unknown or has expired. */
 #ifndef MCP_ERR_NO_SESSION
-#define MCP_ERR_NO_SESSION        (-32007)
+#define MCP_ERR_NO_SESSION        (-32008)
 #endif
 
 #ifdef __cplusplus
