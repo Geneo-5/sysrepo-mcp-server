@@ -59,3 +59,4 @@ dkms.conf
 # Documentation build artifacts
 sphinx/_doxygen/
 __pycache__/
+.DS_Store

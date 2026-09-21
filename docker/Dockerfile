@@ -22,8 +22,10 @@ LABEL org.opencontainers.image.title="sysrepo-mcp-server build environment"
 # 0. Build-time environment variables
 # ----------------------------------------------------------------------------
 # C build flags, shared by the external libraries compiled in this image.
-ENV CFLAGS="-O2 -g -fstack-protector-strong -D_FORTIFY_SOURCE=2"
-ENV CXXFLAGS="-O2 -g -fstack-protector-strong -D_FORTIFY_SOURCE=2"
+ENV CFLAGS="-Wall -Wextra -Wshadow -Wformat=2 -Wuninitialized \
+	-fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+	-O0 -ggdb3"
+ENV CXXFLAGS="${CFLAGS}"
 ENV LDFLAGS="-Wl,-z,relro,-z,now"
 
 # ----------------------------------------------------------------------------
@@ -175,7 +177,7 @@ RUN --mount=type=bind,source=extern/fcgi2,target=/src/fcgi2,readonly \
 # /usr. Both prefixes must stay searchable: overwriting PKG_CONFIG_PATH with
 # /usr/lib/pkgconfig alone hides libyang.pc and sysrepo.pc, and `pkg-config
 # --libs sysrepo` then silently returns nothing.
-ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
 
 # --- 2.5 stroll (data structures) --------------------------------------------
 RUN --mount=type=bind,source=extern/stroll,target=/src/stroll,readonly \

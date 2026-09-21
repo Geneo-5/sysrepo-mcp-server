@@ -39,6 +39,7 @@ usage() {
     echo "  --clean      Clean build (no cache)"
     echo "  --force      Force rebuild (image + sources)"
     echo "  --test       Run smoke tests after build"
+    echo "  --test=ARGS  Run smoke tests after build with ARG"
     echo "  --help       Show this help"
     echo ""
     echo "Examples:"
@@ -54,6 +55,7 @@ DOC_MODE="all"  # all, html, pdf, man
 CLEAN=0
 FORCE=0
 TEST=0
+TEST_ARGS=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -86,6 +88,11 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --test)
+            TEST=1
+            shift
+            ;;
+        --test=*)
+            TEST_ARGS=${1#*=}
             TEST=1
             shift
             ;;
@@ -177,13 +184,19 @@ if [ "$DOCS" -eq 1 ]; then
     esac
 fi
 
+export EXTRA_CFLAGS="-Werror -Wmissing-declarations -Wstrict-prototypes \
+                     -Wextra -Wshadow -Wformat=2 -Wuninitialized \
+                     -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+                     -O0 -ggdb3"
+export EXTRA_LDFLAGS="-Wl,-z,relro,-z,now"
+
 # Step 4: Compile binary
 log_info "Compiling in Docker container..."
 docker run --rm -u "${DOCKER_UID}" \
     -v "${PROJECT_DIR}:${PROJECT_DIR}" \
     -w "${PROJECT_DIR}" \
     "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-    make
+    make  EXTRA_CFLAGS="${EXTRA_CFLAGS}" EXTRA_LDFLAGS="${EXTRA_LDFLAGS}" defconfig build
 
 log_info "Build complete. Binary: ${PROJECT_DIR}/build/sysrepo-mcp"
 
@@ -194,7 +207,7 @@ if [ "$TEST" -eq 1 ]; then
         -v "${PROJECT_DIR}:${PROJECT_DIR}" \
         -w "${PROJECT_DIR}" \
         "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-        make test
+        make test PYTEST_ARGS="${TEST_ARGS}"
 fi
 
 log_info "Done."

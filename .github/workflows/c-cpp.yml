@@ -16,9 +16,9 @@ jobs:
       # Downloads extern/, builds the image, compiles the binary and builds
       # the documentation. The image layer is the slow part; everything else
       # runs inside it.
-      - name: Build the image, the binary and the documentation
+      - name: Build the image
         run: make -C docker build
-      - name: Build the image, the binary and the documentation
+      - name: Build the binary and the documentation
         run: scripts/build-docker.sh --doc
       - name: Run the test suite
         run: scripts/build-docker.sh --test

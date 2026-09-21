@@ -5,29 +5,18 @@
 # Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 ################################################################################
 
-srcdir := src
-srctop := $(TOPDIR)/$(srcdir)
-
-################################################################################
-# Binary
-################################################################################
-
-bins                   += $(PACKAGE)
-$(PACKAGE)-objs        := $(srcdir)/main.o
-main.o-src             := $(srctop)/main.c
-$(PACKAGE)-cflags      := $(EXTRA_CFLAGS)
-$(PACKAGE)-ldflags     := $(EXTRA_LDFRAGS) -ljson-c
-$(PACKAGE)-pkgconf     := libyang sysrepo fcgi libstroll libelog libutils
-
-
 ################################################################################
 # Configuration files
 ################################################################################
 
 config-in  := config.in
+HEADERDIR  := $(TOPDIR)/include
+
 doxyconf   := $(TOPDIR)/sphinx/Doxyfile
+doxyenv    := SRCDIR="$(HEADERDIR) $(SRCDIR)"
 sphinxsrc  := $(TOPDIR)/sphinx
 
+subdirs := src
 
 ##############################################################################
 # Testing
@@ -54,8 +43,14 @@ test: build
 		echo "==> Running test suite ($(PYTEST)) ..."; \
 		PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$$PKG_CONFIG_PATH" \
 		LD_LIBRARY_PATH="/usr/local/lib:$$LD_LIBRARY_PATH" \
-		SYSREPO_MCP_BIN="$(BUILDDIR)/$(PACKAGE)" \
-		$(PYTEST) -v "$(TESTS)" || exit 1; \
+		SYSREPO_MCP_BIN="$(BUILDDIR)/src/$(PACKAGE)" \
+		$(PYTEST) -v "$(TESTS)" $(PYTEST_ARGS)|| exit 1; \
 	else \
 		echo "==> No $(TESTS)/ directory found, nothing to test."; \
 	fi
+
+################################################################################
+# Source code tags generation
+################################################################################
+
+tagfiles := $(shell find $(CURDIR) $(HEADERDIR) -type f)

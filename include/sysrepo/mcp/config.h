@@ -17,8 +17,10 @@
  * contradict.
  */
 
-#ifndef _SYSREPO_MCP_CONFIG_H
-#define _SYSREPO_MCP_CONFIG_H
+#ifndef _SYSREPO_MCP_CONFIG_VERSION_H
+#define _SYSREPO_MCP_CONFIG_VERSION_H
+
+#include <config.h>
 
 #ifndef PACKAGE_NAME
 /** Package name, normally supplied by the build system. */
@@ -30,4 +32,4 @@
 #define PACKAGE_VERSION "0.0.0-unknown"
 #endif /* !PACKAGE_VERSION */
 
-#endif /* !_SYSREPO_MCP_CONFIG_H */
+#endif /* !_SYSREPO_MCP_CONFIG_VERSION_H */

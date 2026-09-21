@@ -7,8 +7,8 @@
 
 override PACKAGE  := sysrepo-mcp
 override VERSION  := 0.1
-EXTRA_CFLAGS     := -O2 -DNDEBUG -Wall -Wextra -Wformat=2
-EXTRA_LDFLAGS    := -O2
+EXTRA_CFLAGS      := -O2 -DNDEBUG -Wall -Wextra -Wformat=2
+EXTRA_LDFLAGS     := -O2
 
 export VERSION EXTRA_CFLAGS EXTRA_LDFLAGS
 

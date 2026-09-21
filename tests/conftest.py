@@ -37,6 +37,7 @@ environment still runs the tests it can:
 
 from __future__ import annotations
 
+import fcntl
 import http.client
 import json
 import os
@@ -307,7 +308,27 @@ class McpClient:
 
         return payload["error"]
 
-    # -- convenience ----------------------------------------------------
+    # -- debug output ---------------------------------------------------
+
+    def _print_pipe(self, fd: Any, label: str) -> None:
+        """Read and print everything available from a process pipe."""
+        try:
+            old_flags = fcntl.fcntl(fd.fileno(), fcntl.F_GETFL)
+            fcntl.fcntl(fd.fileno(), fcntl.F_SETFL, old_flags | os.O_NONBLOCK)
+            lines = b""
+            while True:
+                chunk = os.read(fd.fileno(), 65536)
+                if not chunk:
+                    break
+                lines += chunk
+        except BlockingIOError:
+            pass  # nothing to read
+        finally:
+            fcntl.fcntl(fd.fileno(), fcntl.F_SETFL, old_flags)
+        if lines:
+            print(f"\n--- {label} ---\n{lines.decode(errors='replace')}", end="")
+
+    # -- convenience ----------------------------------------------------</parameter>
 
     def get_config(self, xpath: str, **kwargs: Any) -> dict:
         return self.tool("sr_get_config", {"xpath": xpath, **kwargs})
@@ -450,7 +471,7 @@ def _server_binary() -> Path:
     if override:
         return Path(override).resolve()
 
-    return PROJECT_ROOT / "build" / "sysrepo-mcp"
+    return PROJECT_ROOT / "build" / "src" / "sysrepo-mcp"
 
 
 LIGHTTPD_CONF = """\
@@ -461,6 +482,13 @@ server.bind          = "{host}"
 server.port          = {port}
 server.errorlog      = "{errorlog}"
 server.pid-file      = "{pidfile}"
+
+fastcgi.debug=65535
+debug.log-request-header = "enable"       # Log les entêtes des requêtes reçues
+debug.log-response-header = "enable"      # Log les entêtes des réponses envoyées
+debug.log-request-handling = "enable"     # Log le cheminement interne de la requête
+debug.log-file-not-found = "enable"       # Log l'origine des erreurs 404
+debug.log-condition-handling = "enable"   # Log l'évaluation des conditions (vhosts, etc.)
 
 # 0 means no limit: the oversized-body rejection under test belongs to
 # sysrepo-mcp, and lighttpd must not answer 413 in its place.
@@ -555,10 +583,15 @@ def mcp(
     try:
         probe = client.call("get_status", {})
     except OSError as exc:  # pragma: no cover - environment failure
-        proc.terminate()
-        pytest.skip(f"cannot reach the server: {exc}\n{_tail(errorlog)}")
+        _, output = proc.communicate(timeout=5)
+        print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
+        pytest.skip(
+            f"cannot reach the server: {exc}\n{_tail(errorlog)}"
+        )
 
     if probe.status != 200:
+        _, output = proc.communicate(timeout=5)
+        print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
         proc.terminate()
         pytest.fail(
             f"the server answered HTTP {probe.status} to get_status.\n"
@@ -566,14 +599,23 @@ def mcp(
             f"lighttpd error log:\n{_tail(errorlog)}"
         )
 
+    # Debug: drain and print everything the server has written so far.
+    if proc.stdout is not None:
+        client._print_pipe(proc.stdout, "server stdout")
+    if proc.stderr is not None:
+        client._print_pipe(proc.stderr, "server stderr")
+
     yield client
 
+    # When the fixture tears down, stop the server and print all output.
     proc.send_signal(signal.SIGTERM)
     try:
-        proc.wait(timeout=10)
+        output, _ = proc.communicate(timeout=10)
     except subprocess.TimeoutExpired:  # pragma: no cover - environment failure
         proc.kill()
-        proc.wait(timeout=5)
+        output, _ = proc.communicate(timeout=5)
+    if output:
+        print(f"\n=== sysrepo-mcp server output (final) ===\n{output.decode(errors='replace')}\n{'='*38}", end="")
 
 
 @pytest.fixture(scope="session")

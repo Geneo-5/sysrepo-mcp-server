@@ -144,10 +144,3 @@ DOCKER_RUN := docker run --rm -u "$$(id -u):$$(id -g)" \
 run:
 	@echo "==> Running Docker container interactively ..."
 	$(DOCKER_RUN) -it "$(DOCKER_IMAGE):$(DOCKER_TAG)" bash
-
-# scripts/test.sh runs on the HOST: it is the thing that creates the
-# container. Running it through DOCKER_RUN would nest one docker run inside
-# another, where the docker client is not available.
-test: build
-	@echo "==> Running the test suite ..."
-	"$(PROJECTDIR)/scripts/test.sh"

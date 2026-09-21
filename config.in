@@ -55,12 +55,10 @@ choice
 	config SYSREPO_MCP_SERVER_TRANSPORT_UNIX
 		bool
 		prompt "Unix socket (local only)"
-		default y
 
 	config SYSREPO_MCP_SERVER_TRANSPORT_TCP
 		bool
 		prompt "TCP (remote or proxied)"
-		default n
 
 endchoice
 
@@ -104,12 +102,10 @@ choice
 	config SYSREPO_MCP_SERVER_AUTH_BEARER
 		bool
 		prompt "Authorization: Bearer <key>"
-		default y
 
 	config SYSREPO_MCP_SERVER_AUTH_COOKIE
 		bool
 		prompt "Cookie <name>=<key>"
-		default n
 
 endchoice
 
@@ -210,3 +206,30 @@ config SYSREPO_MCP_SERVER_LOG_CONSOLE
 	default y
 	help
 		Enable console logging (stderr)
+
+	config SYSREPO_MCP_SERVER_SESSION_ID_LEN
+		int
+		range 16 256
+		default 32
+		help
+			Length of session identifiers in hexadecimal characters.
+
+			A 32-character ID carries 128 bits of entropy from
+			/dev/urandom, which is sufficient to prevent guessing.
+
+	config SYSREPO_MCP_SERVER_MAX_TREE_DEPTH
+		int
+		range 1 128
+		default 32
+		help
+			Maximum depth when walking a YANG schema tree.
+
+			Prevents unbounded recursion on deeply nested schemas.
+
+	config SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS
+		int
+		range 100 60000
+		default 5000
+		help
+			Default timeout in milliseconds for sysrepo operations
+			that accept a timeout argument (apply changes, get data).
