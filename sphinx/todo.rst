@@ -42,6 +42,13 @@ Done
   ``sr_module_uninstall``.
 - Introspection: ``get_status``, ``get_tree``, ``get_help``.
 - ``SR_ERR_*`` mapped onto distinct JSON-RPC codes.
+- Source file split: ``main.c`` (FastCGI entry point, tool catalogue),
+  ``config.c`` (Kconfig parsing, sysrepo_open/close), ``sessions.c`` (session
+  CRUD, notification queue, subscription management), ``transport.c`` (HTTP/RPC
+  plumbing, MCP methods, request dispatch), ``utilities.c`` (cross-cutting
+  helpers: ``tree_to_json``, argument extraction, ``tool_find``), and one
+  source + header per functional area (config_tools, operational, rpc,
+  notifications, modules, schema, status).
 
 In progress
 ~~~~~~~~~~~
@@ -149,6 +156,54 @@ build used to get wrong.
   had never run to completion.
 - ``libconfig-dev`` and the stale ``docker/config.cfg`` were dropped: the
   project does not use libconfig.
+
+Source layout
+-------------
+
+``main.c`` was split into 10 source files + 10 headers.
+
+``src/main.c``
+   FastCGI entry point (``FCGX_Accept_r`` loop, signal handling,
+   ``sysrepo_open/close``), and the global ``tools[]`` catalogue.
+
+``src/sessions.c``
+   Session data structures, CRUD, notification queue, subscription management.
+
+``src/transport.c``
+   HTTP/RPC plumbing (``http_send``, ``rpc_send``), MCP methods
+   (``initialize``, ``tools/list``, ``tools/call``), request dispatch,
+   FastCGI ``serve()``.
+
+``src/utilities.c``
+   Cross-cutting helpers: ``tree_to_json``, ``nodetype_to_json``, argument
+   extraction (``arg_string``, ``arg_object``, ``arg_int``, ``arg_bool``,
+   ``arg_xpath``, ``arg_datastore``), ``xpath_wellformed``, ``tool_find``,
+   ``tool_content``.
+
+``src/config_tools.c``
+   ``sr_get_config``, ``sr_edit_config``, ``sr_delete_config``.
+
+``src/operational.c``
+   ``sr_get_operational``.
+
+``src/rpc.c``
+   ``sr_execute_rpc``, ``sr_action``, ``rpc_common``.
+
+``src/notifications.c``
+   All notification tools: subscribe, unsubscribe, list_subscriptions,
+   poll, send.
+
+``src/modules.c``
+   ``sr_list_modules``, ``sr_module_install``, ``sr_module_uninstall``.
+
+``src/schema.c``
+   ``get_tree``, ``get_help``, ``schema_node_to_json``, ``basetype_name``.
+
+``src/status.c``
+   ``get_status``.
+
+Headers live under ``include/sysrepo/mcp/`` — one per source file, forward
+declarations only. Every module includes ``utilities.h`` for shared helpers.
 
 Testing
 -------
