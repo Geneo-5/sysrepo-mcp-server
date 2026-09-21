@@ -50,7 +50,7 @@ need_session(struct tool_ctx *ctx, struct mcp_err *err, const char *tool)
 	if (ctx->mcp)
 		return 0;
 
-	mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+	mcp_err_set(err, MCP_ERR_NO_SESSION, "No session",
 		    "\"%s\" requires an MCP session; "
 		    "call initialize first", tool);
 	return -1;
@@ -87,11 +87,6 @@ tool_sr_notif_subscribe(struct tool_ctx *ctx, struct json_object *args,
 	if (need_session(ctx, err, "sr_notif_subscribe"))
 		return NULL;
 	xpath = arg_string(args, "xpath");
-	if (!xpath) {
-		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
-			    "xpath is required");
-		return NULL;
-	}
 
 	if (xpath && !xpath_wellformed(xpath)) {
 		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",

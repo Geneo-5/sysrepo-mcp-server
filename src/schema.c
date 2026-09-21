@@ -115,11 +115,7 @@ tool_get_tree(struct tool_ctx *ctx, struct json_object *args,
 	}
 
 	xpath = arg_string(args, "xpath");
-	if (!xpath) {
-		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
-			    "xpath is required");
-		return NULL;
-	}
+	/* When xpath is NULL or "/", return the full module tree. */
 
 	const struct ly_ctx     *ly;
 	const struct lys_module *mod;
@@ -131,11 +127,6 @@ tool_get_tree(struct tool_ctx *ctx, struct json_object *args,
 	int                      with_desc = arg_bool(args,
 	                                              "with_descriptions", 0);
 
-	if (!module) {
-		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
-			    "module is required");
-		return NULL;
-	}
 	if (xpath && strcmp(xpath, "/") && !xpath_wellformed(xpath)) {
 		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
 			    "xpath must be \"/\" or an absolute path with a "
