@@ -247,9 +247,152 @@ basetype_name(LY_DATA_TYPE type)
  * Document one YANG schema node found by xpath. Returns node_type, mandatory,
  * config, description, reference, module, namespace, and for leaf/leaflist
  * nodes: base_type, values (for enum), and units.
- *
- * TODO: range, length, pattern restrictions, and default value.
  */
+
+static void
+res_add_range(struct json_object *res, const struct lysc_range *range, LY_DATA_TYPE basetype)
+{
+	struct json_object *values = json_object_new_array();
+	LY_ARRAY_COUNT_TYPE u;
+	char buf[256];
+
+	if (!range)
+		return;
+
+	LY_ARRAY_FOR(range->parts, u) {
+		if (range->parts[u].max_64 == range->parts[u].min_64) {
+			if (basetype <= LY_TYPE_STRING) { /* unsigned values */
+				snprintf(buf, sizeof buf, "%" PRIu64, range->parts[u].max_u64);
+			} else { /* signed values */
+				snprintf(buf, sizeof buf, "%" PRId64, range->parts[u].max_64);
+			}
+		} else {
+			if (basetype <= LY_TYPE_STRING) { /* unsigned values */
+				snprintf(buf, sizeof buf, "%" PRIu64 "..%" PRIu64, range->parts[u].min_u64, range->parts[u].max_u64);
+			} else { /* signed values */
+				snprintf(buf, sizeof buf, "%" PRId64 "..%" PRId64, range->parts[u].min_64, range->parts[u].max_64);
+			}
+		}
+		json_object_array_add(values,json_object_new_string(buf));
+	}	
+
+	json_object_object_add(res, (basetype == LY_TYPE_STRING || basetype == LY_TYPE_BINARY) ? "length" : "range", values);
+}
+
+static void
+add_leaf_help(struct json_object *res, const struct lysc_type *type)
+{
+	LY_ARRAY_COUNT_TYPE u;
+
+	json_object_object_add(res, "base_type",
+		json_object_new_string(basetype_name(type->basetype)));
+
+	switch (type->basetype) {
+	case LY_TYPE_BINARY: {
+		struct lysc_type_bin *bin = (struct lysc_type_bin *)type;
+
+		res_add_range(res, bin->length, type->basetype);
+		break;
+	}
+	case LY_TYPE_UINT8:
+	case LY_TYPE_UINT16:
+	case LY_TYPE_UINT32:
+	case LY_TYPE_UINT64:
+	case LY_TYPE_INT8:
+	case LY_TYPE_INT16:
+	case LY_TYPE_INT32:
+	case LY_TYPE_INT64: {
+		struct lysc_type_num *num = (struct lysc_type_num *)type;
+
+		res_add_range(res, num->range, type->basetype);
+		break;
+	}
+	case LY_TYPE_STRING: {
+		struct lysc_type_str *str = (struct lysc_type_str *)type;
+		struct json_object *values = json_object_new_array();
+
+		res_add_range(res, str->length, type->basetype);
+		
+		LY_ARRAY_FOR(str->patterns, u) {
+			struct json_object *obj = json_object_new_object();
+
+			json_object_object_add(obj, "pattern",
+				json_object_new_string(str->patterns[u]->expr));
+			json_object_object_add(obj, "invert-match", 
+				json_object_new_boolean(str->patterns[u]->inverted));
+			if (str->patterns[u]->dsc)
+				json_object_object_add(obj, "description",
+		                       json_object_new_string(str->patterns[u]->dsc));
+			if (str->patterns[u]->ref)
+				json_object_object_add(res, "reference",
+						json_object_new_string(str->patterns[u]->ref));
+
+			json_object_array_add(values, obj);
+		}
+		json_object_object_add(res, "patterns", values);
+		break;
+	}
+	case LY_TYPE_BITS:
+	case LY_TYPE_ENUM: {
+		/* bits and enums structures are compatible */
+		struct lysc_type_bits *bits = (struct lysc_type_bits *)type;
+		struct json_object *values = json_object_new_array();
+
+		LY_ARRAY_FOR(bits->bits, u) {
+			json_object_array_add(values,
+				json_object_new_string(bits->bits[u].name));
+		}
+
+		json_object_object_add(res, "values", values);
+		break;
+	}
+	case LY_TYPE_BOOL:
+	case LY_TYPE_EMPTY:
+		/* nothing to do */
+		break;
+	case LY_TYPE_DEC64: {
+		struct lysc_type_dec *dec = (struct lysc_type_dec *)type;
+
+		json_object_object_add(res, "fraction-digits", 
+			json_object_new_int(dec->fraction_digits));
+		res_add_range(res, dec->range, dec->basetype);
+		break;
+	}
+	case LY_TYPE_IDENT: {
+		struct lysc_type_identityref *ident = (struct lysc_type_identityref *)type;
+		struct json_object *values = json_object_new_array();
+
+		LY_ARRAY_FOR(ident->bases, u) {
+			json_object_array_add(values,
+				json_object_new_string(ident->bases[u]->name));
+		}
+		json_object_object_add(res, "base", values);
+		break;
+	}
+	case LY_TYPE_INST: {
+		struct lysc_type_instanceid *inst = (struct lysc_type_instanceid *)type;
+
+		json_object_object_add(res, "require-instance", 
+			json_object_new_boolean(inst->require_instance));
+
+		break;
+	}
+	case LY_TYPE_LEAFREF: {
+		struct lysc_type_leafref *lr = (struct lysc_type_leafref *)type;
+
+		json_object_object_add(res, "path", 
+			json_object_new_string(lyxp_get_expr(lr->path)));
+		json_object_object_add(res, "require-instance", 
+			json_object_new_boolean(lr->require_instance));
+		break;
+	}
+	case LY_TYPE_UNION: {
+		struct lysc_type_union *un = (struct lysc_type_union *)type;
+
+		break;
+	}
+	}
+}
 
 struct json_object *
 tool_get_help(struct tool_ctx *ctx, struct json_object *args,
@@ -259,6 +402,7 @@ tool_get_help(struct tool_ctx *ctx, struct json_object *args,
 	const struct ly_ctx    *ly;
 	const struct lysc_node *node;
 	struct json_object     *res;
+	LY_ARRAY_COUNT_TYPE    i;
 
 	if (!xpath)
 		return NULL;
@@ -306,42 +450,97 @@ tool_get_help(struct tool_ctx *ctx, struct json_object *args,
 	}
 
 	if (node->nodetype & (LYS_LEAF | LYS_LEAFLIST)) {
-		const struct lysc_node_leaf *leaf =
-		        (const struct lysc_node_leaf *)node;
-
-		if (leaf->type) {
-			json_object_object_add(res, "base_type",
-			                       json_object_new_string(
-				       basetype_name(
-				       leaf->type->basetype)));
-
-			if (leaf->type->basetype == LY_TYPE_ENUM) {
-				const struct lysc_type_enum *enums =
-				        (const struct lysc_type_enum *)leaf->type;
-				struct json_object *values =
-				        json_object_new_array();
-				LY_ARRAY_COUNT_TYPE i;
-
-				LY_ARRAY_FOR(enums->enums, i) {
-					json_object_array_add(
-					        values,
-					        json_object_new_string(
-					                enums->enums[i].name));
-				}
-
-				json_object_object_add(res, "values", values);
-			}
-		}
-
+		const struct lysc_node_leaf *leaf = (const struct lysc_node_leaf *)node;
+		struct json_object *musts = json_object_new_array();
+		struct json_object *whens = json_object_new_array();
+		
+		add_leaf_help(res, leaf->type);
 		if (leaf->units)
-			json_object_object_add(res, "units",
-			                       json_object_new_string(
-				       leaf->units));
+			json_object_object_add(res, "units", json_object_new_string(leaf->units));
+
+		LY_ARRAY_FOR(leaf->musts, i) {
+			struct json_object *obj =
+				json_object_new_object();
+			const char *expr =
+				lyxp_get_expr(leaf->musts[i].cond);
+
+			json_object_object_add(obj, "expression",
+				json_object_new_string(expr));
+			if (leaf->musts[i].dsc)
+				json_object_object_add(
+					obj, "description",
+					json_object_new_string(
+						leaf->musts[i].dsc));
+			json_object_array_add(musts, obj);
+		}
+		json_object_object_add(res, "must", musts);
+
+		LY_ARRAY_FOR(leaf->when, i) {
+			const char *expr = lyxp_get_expr(leaf->when[i]->cond);
+
+			json_object_array_add(whens, json_object_new_string(expr));
+		}
+		json_object_object_add(res, "when", whens);
 	}
 
-	/* TODO: range, length and pattern restrictions, and the default
-	 * value. They live behind LY_ARRAY-encoded lysc_range structures; see
-	 * sphinx/todo.rst. */
+	/* Must and when assertions on the node itself.
+	 * musts is a sized array of lysc_must (by value, not
+	 * pointer); when is a sized array of lysc_when *. */
+
+	if (node->nodetype == LYS_LEAF) {
+		const struct lysc_node_leaf *leaf = (const struct lysc_node_leaf *)node;
+	
+		/* Default value. If the node carries a default (either explicit or
+		 * from its type), validate it and return the canonical string. */
+
+		if (node->flags & LYS_SET_DFLT) {
+			const char *raw = leaf->dflt.str;
+			const char *canonical = NULL;
+
+			if (raw && lyd_value_validate_dflt(
+				node, raw, leaf->dflt.prefixes,
+				NULL, NULL, &canonical) == LY_SUCCESS) {
+				json_object_object_add(res, "default",
+					json_object_new_string(canonical));
+				lydict_remove(ly, canonical);
+			}
+		}
+	}
+
+	if (node->nodetype == LYS_LEAFLIST) {
+		const struct lysc_node_leaflist *leaf = (const struct lysc_node_leaflist *)node;
+	
+		/* Default value. If the node carries a default (either explicit or
+		 * from its type), validate it and return the canonical string. */
+
+		if (node->flags & LYS_SET_DFLT) {
+			struct json_object *defaults = json_object_new_array();
+			
+			LY_ARRAY_FOR(leaf->dflts, i) {
+				const char *raw = leaf->dflts[i].str;
+				const char *canonical = NULL;
+
+				if (raw && lyd_value_validate_dflt(
+					node, raw, leaf->dflts[i].prefixes,
+					NULL, NULL, &canonical) == LY_SUCCESS) {
+					json_object_array_add(defaults,
+						json_object_new_string(canonical));
+					lydict_remove(ly, canonical);
+				}
+			}
+			json_object_object_add(res, "default", defaults);
+
+		}
+		json_object_object_add(res, "min-elements", json_object_new_int(leaf->min));
+		if (leaf->max)
+			json_object_object_add(res, "max-elements", json_object_new_int(leaf->max));
+		else
+			json_object_object_add(res, "max-elements", json_object_new_string("unbounded"));
+
+		json_object_object_add(res, "ordered-by",
+			json_object_new_string((leaf->flags & LYS_ORDBY_USER) ? "user" : "system"));
+		
+	}
 
 	sr_session_release_context(ctx->sess);
 

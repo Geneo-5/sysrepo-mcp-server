@@ -259,13 +259,10 @@ def test_help_omits_type_details_for_a_container(mcp_oven):
     assert "base_type" not in help_
 
 
-@pytest.mark.xfail(
-    reason="get_help does not report ranges, patterns or defaults yet; see "
-           "sphinx/todo.rst, milestone 3 (introspection)",
-    strict=False,
-)
 def test_help_reports_the_range_and_default(mcp_oven):
     help_ = mcp_oven.tool("get_help", {"xpath": "/oven:oven/temperature"})
 
-    assert help_["range"] == "0..250"
+    assert help_["range"] == ["0..250"]
     assert help_["default"] == "0"
+    assert "length" not in help_
+    assert "pattern" not in help_

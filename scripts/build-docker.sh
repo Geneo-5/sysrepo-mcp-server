@@ -40,6 +40,7 @@ usage() {
     echo "  --force      Force rebuild (image + sources)"
     echo "  --test       Run smoke tests after build"
     echo "  --test=ARGS  Run smoke tests after build with ARG"
+    echo "  --run        Run after build"
     echo "  --help       Show this help"
     echo ""
     echo "Examples:"
@@ -47,6 +48,7 @@ usage() {
     echo "  $(basename "$0") --doc        # Build binary + all docs"
     echo "  $(basename "$0") --doc-html   # Build binary + HTML docs"
     echo "  $(basename "$0") --test       # Build + smoke test"
+    echo "  $(basename "$0") --run        # Build + run"
 }
 
 # Parse arguments
@@ -56,6 +58,7 @@ CLEAN=0
 FORCE=0
 TEST=0
 TEST_ARGS=""
+RUN=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -85,6 +88,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force)
             FORCE=1
+            shift
+            ;;
+        --run)
+            RUN=1
             shift
             ;;
         --test)
@@ -208,6 +215,17 @@ if [ "$TEST" -eq 1 ]; then
         -w "${PROJECT_DIR}" \
         "${DOCKER_IMAGE}:${DOCKER_TAG}" \
         make test PYTEST_ARGS="${TEST_ARGS}"
+fi
+
+# Step 6: Run (if requested)
+if [ "$RUN" -eq 1 ]; then
+    log_info "Running service..."
+    docker run --rm -it \
+        -p 8080:8080 \
+        -v "${PROJECT_DIR}:${PROJECT_DIR}" \
+        -w "${PROJECT_DIR}" \
+        "${DOCKER_IMAGE}:${DOCKER_TAG}" \
+        docker/run.sh
 fi
 
 log_info "Done."

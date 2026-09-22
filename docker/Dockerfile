@@ -213,10 +213,3 @@ RUN rm -rf /build
 # The default lighttpd config runs as its package user/group; the service is
 # simply made available to be started on demand (see CMD below).
 VOLUME /var/lib/lighttpd
-
-# ----------------------------------------------------------------------------
-# 4. Default behaviour
-# ----------------------------------------------------------------------------
-# Default entry point runs lighttpd in the background, then execs the requested
-# command. Override it with `make test` (see README) to build & test the project.
-CMD ["bash", "-lc", "lighttpd -D -f /etc/lighttpd/lighttpd.conf & sleep 1; exec bash"]
