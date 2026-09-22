@@ -120,19 +120,90 @@ Milestone 3: logging and packaging
 - Ship a systemd unit and an example lighttpd fragment.
 - Ship the YANG module and a script to install it into sysrepo.
 
-Smaller items
--------------
+Environment d'agent
+-------------------
 
-- ``initialize`` ignores the ``protocolVersion`` the client sends. An
-  unsupported revision should be refused explicitly rather than answered as
-  if it were understood.
-- ``get_help`` reports the base type, not the typedef name: the latter is not
-  recoverable from the compiled schema. Reaching it means walking the parsed
-  schema instead.
-- ``sr_list_modules`` does not report enabled features, for the same reason.
-- ``get_tree`` always reports an empty ``imports`` array.
-- ``sr_edit_config`` does not report how many nodes it changed.
-- Run a real MCP client against the server, not only the test suite.
+Bilan tiré de l'utilisation pratique du serveur sysrepo-mcp comme environnement
+d'exécution d'outils. Objectif : identifier ce qui rend cet environnement
+rapide et facile à utiliser, et ce qui le ralentit.
+
+Points positifs
+~~~~~~~~~~~~~~~
+
+- **Interface unifiée.** Un seul protocole (JSON-RPC sur FastCGI) pour tout :
+  lecture/écriture de datastore, appels RPC, notifications, gestion de modules.
+  Un agent n'a pas à mémoriser plusieurs API.
+
+- **Introspection riche.** ``get_status``, ``get_tree`` et ``get_help``
+  donnent module par module le schéma compilé, les valeurs par défaut, les
+  plages, les patterns et les descriptions. On peut naviguer un module inconnu
+  sans lire la documentation.
+
+- **XPath stable.** Le XPath est l'identifiant canonique de chaque nœud : pas
+  d'IDs aléatoires, pas de lookup par nom. Un agent qui apprend le XPath d'un
+  nœud le retrouve toujours, dans n'importe quel datastore.
+
+- **Multi-datastore.** ``running``, ``startup`` et ``candidate`` sont
+  accessibles directement. Un agent peut lire, valider et valider avant
+  d'appliquer.
+
+- **Notifications complètes.** Cycle complet géré par le serveur :
+  ``sr_notif_subscribe``, ``sr_notif_poll``, ``sr_notif_unsubscribe``,
+  ``sr_notif_send``. Aucun thread par défaut : l'agent poll à chaque requête,
+  ce qui évite la concurrence sur la file d'attente.
+
+- **Sessions MCP.** Cycle de vie géré (identification, TTL d'inactivité,
+  expiration, ``DELETE``). Un agent peut lancer plusieurs sessions parallèles.
+
+- **Cartographie des erreurs.** ``SR_ERR_*`` mappés sur des codes
+  JSON-RPC distincts. Un agent peut distinguer une erreur de validation d'une
+  erreur interne et agir en conséquence.
+
+- **Intégration YANG native.** ``sysrepo-mcp`` est linké contre libyang et
+  sysrepo. Les modifications du schéma se répercutent directement dans
+  ``get_tree`` et ``get_help``.
+
+Points à améliorer
+~~~~~~~~~~~~~~~~~~
+
+- **Absence d'authentification.** Tout agent a les droits complets de
+  l'utilisateur système. C'est le risque le plus critique (voir *Milestone 2*).
+
+- **``max-procs = 1``.** Sessions, abonnements et files d'attente sont locaux
+  au processus. Un agent ne peut pas bénéficier de plusieurs workers, et les
+  requêtes consécutives doivent arriver au même processus.
+
+- **RPC sans introspection d'entrée.** ``get_help`` ne remonte pas les
+  paramètres d'entrée d'un RPC. ``time`` dans ``insert-food`` est de type
+  ``unknown`` : le serveur ne sait pas le valider, et un agent ne peut pas
+  deviner le format attendu. Un ``get_input_schema`` ou une description dans
+  ``get_help`` sur le nœud parent serait utile.
+
+- **Pas de feedback après écriture.** ``sr_edit_config`` renvoie ``{"ok": true}``
+  mais ne dit pas combien de nœuds ont été modifiés. Un agent ne peut pas
+  confirmer que l'edit a fait ce qu'il croyait.
+
+- **Aucun logging.** Les erreurs sont envoyées via ``fprintf(stderr)`` au lieu
+  de syslog ou d'elog. Un agent ne peut pas lire les logs du serveur, et un
+  crash est invisible.
+
+- **Il manque un ``copy-config``.** Un outil acceptant ``source`` et
+  ``destination`` (datastore par datastore) pour copier le contenu d'un
+  datastore dans un autre (ex. ``startup → running``, ``candidate → running``).
+  L'équivalent YANG de ``copy-config`` de NETCONF.
+
+- **Pas d'extension de schéma.** ``sr_module_install`` est refusé par défaut.
+  Un agent ne peut pas installer de nouveaux modules YANG : le datastore est
+  verrouillé sur les 27 modules déjà présents.
+
+- **Valeurs par défaut : minimum par défaut.** La chaîne d'appel est
+  ``sr_get_config`` → ``sr_get_data()`` (sans ``LYD_OPT_DEFAULT``) →
+  ``tree_to_json()`` → ``lyd_print_mem()`` : l'arbre retourné contient
+  uniquement les feuilles explicitement écrites, et l'impression JSON n'ajoute
+  pas les valeurs implicites. ``sr_get_config`` devrait accepter un paramètre
+  ``options`` (par défaut ``0``) transmis à ``tree_to_json()`` :
+  ``LYD_PRINT_WD_TRIM`` (16, le minimum) par défaut, ``LYD_PRINT_WD_ALL`` (32)
+  s'il veut tout voir.
 
 Build system
 ------------
