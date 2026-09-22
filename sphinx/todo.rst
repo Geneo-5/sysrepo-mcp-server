@@ -54,7 +54,8 @@ In progress
 ~~~~~~~~~~~
 
 - ``get_help`` reports the node type, base type, units, enumeration values,
-  description and flags, but not ranges, patterns or default values.
+  description and flags, ranges (as string arrays), patterns and default values.
+- ``sr_list_modules`` does not report enabled features.
 - ``sr_list_modules`` does not report enabled features.
 
 Not started
@@ -125,9 +126,6 @@ Smaller items
 - ``initialize`` ignores the ``protocolVersion`` the client sends. An
   unsupported revision should be refused explicitly rather than answered as
   if it were understood.
-- ``get_help`` does not report ranges, patterns or default values. They live
-  behind ``LY_ARRAY``-encoded ``lysc_range`` structures and behind
-  ``lyd_value_get_canonical()``.
 - ``get_help`` reports the base type, not the typedef name: the latter is not
   recoverable from the compiled schema. Reaching it means walking the parsed
   schema instead.

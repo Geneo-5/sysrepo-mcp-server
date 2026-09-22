@@ -43,7 +43,7 @@ Résumé au moment de la rédaction. Le détail est dans `sphinx/todo.rst`.
 | Gestion des modules, introspection | fonctionnel |
 | Authentification, NACM | **absents** |
 | elog | **absent**, `fprintf(stderr)` à la place |
-| `get_help` : ranges, patterns, valeurs par défaut | **absents** |
+| `get_help` : ranges, patterns, valeurs par défaut | **implémenté** |
 
 > **Aucun contrôle d'accès n'est appliqué.** Un agent obtient les droits de
 > l'utilisateur système du serveur. Ne pas exposer cette version.

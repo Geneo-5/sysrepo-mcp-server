@@ -1308,8 +1308,7 @@ build valid XPaths without reading the YANG source.
 get_help
 ~~~~~~~~
 
-*Status: partial.* Documents a single schema node. Ranges, patterns and
-default values are not reported yet.
+*Status: implemented.* Documents a single schema node.
 
 **Arguments**
 
@@ -1320,8 +1319,22 @@ default values are not reported yet.
 
 ``xpath`` (string), ``node_type`` (string), ``description`` (string),
 ``mandatory`` (boolean), ``config`` (boolean), ``module`` (string) and
-``namespace`` (string). For a leaf or leaf-list, also ``base_type`` (string),
-``units`` (string, when declared) and ``values`` (array, for an enumeration).
+``namespace`` (string).
+
+For a leaf or leaf-list: ``base_type`` (string), ``units`` (string, when
+declared), ``range`` (array of strings, for numeric types), ``length``
+(array of strings, for string/binary types), ``values`` (array, for
+enumeration/bits), ``fraction-digits`` (integer, for decimal64),
+``base`` (array, for identityref), ``path`` and ``require-instance``
+(for leafref), ``must`` (array of expressions) and ``when`` (array of
+expressions).
+
+A leaf also reports ``default`` (string). A leaf-list reports ``default``
+(array), ``min-elements`` (integer), ``max-elements`` (integer or the
+string ``"unbounded"``) and ``ordered-by`` (``"user"`` or ``"system"``).
+
+For a string type, the result also includes ``patterns`` (array of objects
+with ``pattern``, ``invert-match``, and optional ``description``).
 
 .. note::
 
@@ -1352,6 +1365,8 @@ default values are not reported yet.
            "xpath": "/oven:oven/temperature",
            "node_type": "leaf",
            "base_type": "uint8",
+           "range": ["0..250"],
+           "default": "0",
            "description": "Slider for configuring the desired temperature.",
            "mandatory": false,
            "config": true,
