@@ -72,6 +72,7 @@ RUN apt-get update && \
         libcurl4-openssl-dev \
         libhiredis-dev \
         libnghttp2-dev \
+        libconfig-dev \
         doxygen \
         # JSON-RPC message parsing (the project)
         libjson-c-dev \

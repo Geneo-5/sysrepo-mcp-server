@@ -50,82 +50,185 @@ Done
   source + header per functional area (config_tools, operational, rpc,
   notifications, modules, schema, status).
 
-In progress
-~~~~~~~~~~~
+Priority backlog
+-----------------
 
-- ``get_help`` reports the node type, base type, units, enumeration values,
-  description and flags, ranges (as string arrays), patterns and default values.
-- ``sr_list_modules`` does not report enabled features.
-- ``sr_list_modules`` does not report enabled features.
+Everything still to do, across the whole project (milestones, agent-usage
+gaps, tests, future work), gathered here in a single ordered list. Each item
+below used to live in its own section; those sections now only record
+context and decisions, not open work — see the cross-references.
 
-Not started
-~~~~~~~~~~~
+Running several agent sessions concurrently against one server is not a
+goal here — see *Not planned* below — so nothing in this backlog is about
+lifting ``max-procs = 1``.
 
-- Authentication and NACM.
-- elog integration.
-- A shared session store, which is what ``max-procs = 1`` is waiting on.
-
-Milestone 1: a shared session store
------------------------------------
-
-The largest open item, and the one that caps throughput.
-
-Sessions, their notification subscriptions and their notification queues live
-in the FastCGI process that created them. The deployment is therefore pinned
-to ``max-procs = 1``: with more workers, consecutive requests from one agent
-land in different processes and the session is not found.
-
-- Move the session registry out of the process. The natural home is
-  ``/sysrepo-mcp:server-state/session`` in the operational datastore, which
-  gives sharing, expiry and introspection at once.
-- Decide what happens to subscriptions. A sysrepo subscription belongs to the
-  process that created it, so sharing sessions means either one worker
-  receiving events for the others, or moving the queue into the datastore too
-  and letting any worker drain it.
-- Move ``MAX_SESSIONS``, ``SESSION_TTL`` and ``NOTIF_QUEUE_SIZE`` from
-  ``config.in`` to the YANG module once the store is no longer a fixed array.
-- Raise ``max-procs`` in ``docker/lighttpd.conf`` and in the documentation
-  only after a concurrency test passes.
-
-Milestone 2: access control
----------------------------
+P0 — Security (blocks any untrusted deployment)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. warning::
 
-   Until this milestone is complete, an agent has every right of the system
-   user running the server. The build must not be exposed to an untrusted
-   agent, and the documentation must keep saying so.
+   Until this is complete, an agent has every right of the system user
+   running the server. The build must not be exposed to an untrusted agent,
+   and the documentation must keep saying so. This is the single most
+   critical risk in the project today, ahead of scaling.
 
-- Extract the credential from ``HTTP_AUTHORIZATION``, or from the cookie.
-- Look the key up in ``/sysrepo-mcp:api-key`` and resolve the NACM user.
-- Store keys hashed, and compare in constant time.
-- ``sr_nacm_init()`` at startup, ``sr_nacm_set_user()`` per request,
-  ``sr_nacm_check_operation()`` before an RPC, ``sr_nacm_destroy()`` at exit.
-- Apply the module allow-list and the write protection of ``config.in`` before
-  calling sysrepo.
-- Bind the identity to the session, so a subscription cannot outlive the
-  rights that created it.
-- Deny ``sr_module_install`` and ``sr_module_uninstall`` by default. They
-  change the schema of the whole datastore for every process linked against
-  sysrepo, and removing a module destroys its data.
-- Log every configuration change with the identity that caused it.
+1. Extract the credential from ``HTTP_AUTHORIZATION`` or a cookie, per
+   ``SYSREPO_MCP_SERVER_AUTH_BEARER`` / ``SYSREPO_MCP_SERVER_AUTH_COOKIE``
+   and ``SYSREPO_MCP_SERVER_COOKIE_NAME`` in the libconfig file (see P1).
+2. Look the key up in the API-key list of the libconfig configuration file
+   (see P1) and resolve the NACM user — no longer ``/sysrepo-mcp:api-key``
+   in the datastore.
+3. Store keys hashed, and compare in constant time.
+4. ``sr_nacm_init()`` at startup, ``sr_nacm_set_user()`` per request,
+   ``sr_nacm_check_operation()`` before an RPC, ``sr_nacm_destroy()`` at exit
+   — gated by ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``.
+5. Apply the module allow-list (``SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES``,
+   gated by ``SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER``), the operation
+   filter (``SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER``) and the
+   write protection (``SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION``)
+   from the libconfig file before calling sysrepo — all under the master
+   ``SYSREPO_MCP_SERVER_ACL_ENABLED`` switch (see P1).
+6. Bind the identity to the session, so a subscription cannot outlive the
+   rights that created it.
+7. Deny ``sr_module_install`` and ``sr_module_uninstall`` by default. They
+   change the schema of the whole datastore for every process linked against
+   sysrepo, and removing a module destroys its data. (Revisit once
+   authentication exists — see P3.4.)
+8. Log every configuration change with the identity that caused it.
+9. Cover authentication and NACM with tests once they exist. Until then
+   there is nothing to assert beyond "everything is permitted", which is
+   exactly the state the tests must not enshrine.
 
-Milestone 3: logging and packaging
-----------------------------------
+P1 — Configuration: drop the YANG module, adopt libconfig
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- Replace ``fprintf(stderr, ...)`` with elog: syslog, file and console back
-  ends, and the elog command-line parser.
-- Honour the ``SYSREPO_MCP_SERVER_LOG_*`` options, which are declared in
-  ``config.in`` and read by nobody.
-- Ship a systemd unit and an example lighttpd fragment.
-- Ship the YANG module and a script to install it into sysrepo.
+Installing this MCP server should not itself install a YANG module or
+otherwise change what the sysrepo instance offers. Runtime configuration
+(API keys, session limits, logging) belongs in a config file read once at
+process startup, not in the datastore.
+
+1. Remove ``yang/sysrepo-mcp.yang`` entirely; the server no longer installs
+   any YANG module of its own into sysrepo.
+2. Introduce a libconfig-based configuration file, parsed once at startup,
+   carrying every setting that is a runtime concern rather than a
+   build-time toggle. The list is now decided:
+
+   - session limits: ``SYSREPO_MCP_SERVER_MAX_SESSIONS``,
+     ``SYSREPO_MCP_SERVER_SESSION_TTL``,
+     ``SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE``;
+   - transport: ``SYSREPO_MCP_SERVER_TRANSPORT_UNIX``,
+     ``SYSREPO_MCP_SERVER_TRANSPORT_TCP``,
+     ``SYSREPO_MCP_SERVER_UNIX_SOCKET_PATH``,
+     ``SYSREPO_MCP_SERVER_TCP_HOST``, ``SYSREPO_MCP_SERVER_TCP_PORT``;
+   - authentication: ``SYSREPO_MCP_SERVER_AUTH_BEARER``,
+     ``SYSREPO_MCP_SERVER_AUTH_COOKIE``,
+     ``SYSREPO_MCP_SERVER_COOKIE_NAME``, plus the API key list itself;
+   - access control: ``SYSREPO_MCP_SERVER_ACL_ENABLED``,
+     ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``,
+     ``SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER``,
+     ``SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER``,
+     ``SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION``,
+     ``SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES``;
+   - logging: the ``SYSREPO_MCP_SERVER_LOG_*`` options.
+
+3. Everything else in ``config.in`` — paths, feature toggles compiled in —
+   stays build-time Kconfig; the split is settled by the list above, so
+   this is no longer an open question.
+4. Update ``sysrepo_open/close`` in ``config.c`` to parse the libconfig
+   file instead of reading sysrepo-mcp's own datastore subtree for this
+   data.
+5. Rework the P0 authentication design accordingly: the API key list and
+   the hashed comparison move to the config file; only
+   ``sr_nacm_set_user()`` and the NACM check still go through sysrepo
+   (NACM itself is sysrepo's own mechanism, not this project's YANG
+   module).
+6. Rewrite ``tests/test_errors.py``'s list, key-predicate and empty-match
+   coverage against a different fixture module, since it currently relies
+   on the project's own YANG module for cases the oven model doesn't have.
+7. Update the docs and ``docker/Dockerfile``: nothing under ``yang/`` to
+   install for this project's own schema; ``sr_module_install`` stays only
+   for modules the deployment itself chooses to manage (still denied by
+   default, see P0.7).
+
+P2 — Agent-usability gaps
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Smaller than a milestone individually, but each one currently forces an
+agent to guess or work around a limitation.
+
+1. **RPC input introspection.** ``get_help`` does not remount an RPC's input
+   parameters — e.g. ``time`` in ``insert-food`` is reported as type
+   ``unknown``, so the server cannot validate it and an agent cannot guess
+   the expected format. Add a ``get_input_schema`` tool, or a description on
+   the parent node in ``get_help``.
+2. **No feedback after write.** ``sr_edit_config`` returns ``{"ok": true}``
+   but not how many nodes were modified. An agent cannot confirm the edit
+   did what it expected.
+3. **Missing ``copy-config``.** A tool taking ``source`` and ``destination``
+   (datastore by datastore) to copy one datastore's content into another
+   (e.g. ``startup → running``, ``candidate → running``) — the YANG
+   equivalent of NETCONF's ``copy-config``.
+4. **Default values: minimum by default.** The call chain is
+   ``sr_get_config`` → ``sr_get_data()`` (without ``LYD_OPT_DEFAULT``) →
+   ``tree_to_json()`` → ``lyd_print_mem()``: the returned tree only holds
+   explicitly written leaves, and JSON printing does not add implicit
+   values. ``sr_get_config`` should accept an ``options`` parameter
+   (default ``0``) passed to ``tree_to_json()``: ``LYD_PRINT_WD_TRIM`` (16,
+   the minimum) by default, ``LYD_PRINT_WD_ALL`` (32) to see everything.
+5. ``get_help`` still needs to report the node type, base type, units,
+   enumeration values, description and flags, ranges (as string arrays),
+   patterns and default values (in progress).
+6. ``sr_list_modules`` does not report enabled features.
+
+P3 — Logging and packaging
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. Replace ``fprintf(stderr, ...)`` with elog: syslog, file and console
+   back ends, and the elog command-line parser.
+2. Honour the log level and backend selection once they are read from the
+   libconfig file (see P1), instead of being declared in ``config.in`` and
+   read by nobody.
+3. Ship a systemd unit and an example lighttpd fragment.
+4. Once authentication exists (P0), revisit whether ``sr_module_install``
+   and ``sr_module_uninstall`` can be allowed for identities with the right
+   NACM permissions instead of being denied outright.
+
+P4 — Tests to complete
+~~~~~~~~~~~~~~~~~~~~~~
+
+1. Run the suite in CI against a matrix of libyang and sysrepo revisions;
+   the two are pinned together and bumping them is where the introspection
+   code will break first.
+2. Run the server under valgrind; the JSON reference counting and the
+   notification queue deserve it.
+3. Exercise notification replay, which needs replay support enabled on a
+   module.
+4. Exercise queue overflow and the ``dropped`` counter.
+5. Cover ``sr_module_install`` and ``sr_module_uninstall`` beyond argument
+   validation; a test that installs a module changes the shared repository
+   and needs its own throwaway one.
+
+P5 — Later / future features
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+No immediate blocker, but worth keeping on the radar.
+
+1. OAuth2 or JWT credentials, which the MCP authorization specification
+   builds on (builds on P0).
+2. Transactions spanning several tool calls, with explicit commit and
+   rollback.
+3. A dry-run mode, validating an edit without committing it.
+4. A diff tool between two datastores.
+5. Metrics export.
 
 Environment d'agent
 -------------------
 
 Bilan tiré de l'utilisation pratique du serveur sysrepo-mcp comme environnement
 d'exécution d'outils. Objectif : identifier ce qui rend cet environnement
-rapide et facile à utiliser, et ce qui le ralentit.
+rapide et facile à utiliser. Les points d'amélioration identifiés ici sont
+suivis dans le *Priority backlog* ci-dessus (P0 pour l'authentification, P2
+pour les manques d'ergonomie agent, P3 pour le logging).
 
 Points positifs
 ~~~~~~~~~~~~~~~
@@ -163,48 +266,6 @@ Points positifs
   sysrepo. Les modifications du schéma se répercutent directement dans
   ``get_tree`` et ``get_help``.
 
-Points à améliorer
-~~~~~~~~~~~~~~~~~~
-
-- **Absence d'authentification.** Tout agent a les droits complets de
-  l'utilisateur système. C'est le risque le plus critique (voir *Milestone 2*).
-
-- **``max-procs = 1``.** Sessions, abonnements et files d'attente sont locaux
-  au processus. Un agent ne peut pas bénéficier de plusieurs workers, et les
-  requêtes consécutives doivent arriver au même processus.
-
-- **RPC sans introspection d'entrée.** ``get_help`` ne remonte pas les
-  paramètres d'entrée d'un RPC. ``time`` dans ``insert-food`` est de type
-  ``unknown`` : le serveur ne sait pas le valider, et un agent ne peut pas
-  deviner le format attendu. Un ``get_input_schema`` ou une description dans
-  ``get_help`` sur le nœud parent serait utile.
-
-- **Pas de feedback après écriture.** ``sr_edit_config`` renvoie ``{"ok": true}``
-  mais ne dit pas combien de nœuds ont été modifiés. Un agent ne peut pas
-  confirmer que l'edit a fait ce qu'il croyait.
-
-- **Aucun logging.** Les erreurs sont envoyées via ``fprintf(stderr)`` au lieu
-  de syslog ou d'elog. Un agent ne peut pas lire les logs du serveur, et un
-  crash est invisible.
-
-- **Il manque un ``copy-config``.** Un outil acceptant ``source`` et
-  ``destination`` (datastore par datastore) pour copier le contenu d'un
-  datastore dans un autre (ex. ``startup → running``, ``candidate → running``).
-  L'équivalent YANG de ``copy-config`` de NETCONF.
-
-- **Pas d'extension de schéma.** ``sr_module_install`` est refusé par défaut.
-  Un agent ne peut pas installer de nouveaux modules YANG : le datastore est
-  verrouillé sur les 27 modules déjà présents.
-
-- **Valeurs par défaut : minimum par défaut.** La chaîne d'appel est
-  ``sr_get_config`` → ``sr_get_data()`` (sans ``LYD_OPT_DEFAULT``) →
-  ``tree_to_json()`` → ``lyd_print_mem()`` : l'arbre retourné contient
-  uniquement les feuilles explicitement écrites, et l'impression JSON n'ajoute
-  pas les valeurs implicites. ``sr_get_config`` devrait accepter un paramètre
-  ``options`` (par défaut ``0``) transmis à ``tree_to_json()`` :
-  ``LYD_PRINT_WD_TRIM`` (16, le minimum) par défaut, ``LYD_PRINT_WD_ALL`` (32)
-  s'il veut tout voir.
-
 Build system
 ------------
 
@@ -224,7 +285,8 @@ build used to get wrong.
 - ``.github/workflows/c-cpp.yml``: the script path was wrong, and the workflow
   had never run to completion.
 - ``libconfig-dev`` and the stale ``docker/config.cfg`` were dropped: the
-  project does not use libconfig.
+  project did not use libconfig at the time. (This is being reversed — see
+  *P1 — Configuration* in the Priority backlog.)
 
 Source layout
 -------------
@@ -281,7 +343,7 @@ The suite in ``tests/`` drives the server the way a client does: HTTP to
 lighttpd on port 80, forwarded over FastCGI, against the upstream oven plugin
 from ``extern/sysrepo/examples/plugin/oven.c``. It runs in a private sysrepo
 repository and shared-memory namespace, so it never touches the system
-repository.
+repository. Remaining test work is tracked in *P4 — Tests to complete* above.
 
 Layout:
 
@@ -315,25 +377,6 @@ Layout:
    project's own YANG module, which supplies the list, key predicate and
    empty-match cases that the oven model has none of.
 
-Remaining:
-
-- Run the suite in CI against a matrix of libyang and sysrepo revisions; the
-  two are pinned together and bumping them is where the introspection code
-  will break first.
-- Run the server under valgrind; the JSON reference counting and the
-  notification queue deserve it.
-- Add a concurrency test, which only becomes meaningful once ``max-procs``
-  can be raised above 1.
-- Exercise notification replay, which needs replay support enabled on a
-  module.
-- Exercise queue overflow and the ``dropped`` counter.
-- Cover ``sr_module_install`` and ``sr_module_uninstall`` beyond argument
-  validation; a test that installs a module changes the shared repository and
-  needs its own throwaway one.
-- Cover authentication and NACM once they exist. Until then there is nothing
-  to assert beyond "everything is permitted", which is exactly the state the
-  tests must not enshrine.
-
 Not planned
 -----------
 
@@ -351,25 +394,19 @@ Decisions already taken, recorded here so they are not re-litigated:
 **A direct HTTP listener**
    HTTP, TLS and rate limiting belong to the reverse proxy.
 
-**libconfig**
-   Build-time configuration is Kconfig, runtime configuration is YANG. There
-   is no third configuration file.
-
-Later
------
-
-- OAuth2 or JWT credentials, which the MCP authorization specification builds
-  on.
-- Transactions spanning several tool calls, with explicit commit and rollback.
-- A dry-run mode, validating an edit without committing it.
-- A diff tool between two datastores.
-- Horizontal scaling behind a load balancer, once sessions are shared.
-- Metrics export.
+**Multiple concurrent agent sessions / a shared session store**
+   This is an MCP server for configuring one complex system, not a
+   multi-tenant service. Running several agents against it at once risks
+   conflicting, interleaved configuration changes on the same datastore —
+   the opposite of what the server exists to prevent. Sessions therefore
+   stay local to a single FastCGI process, and ``max-procs = 1`` is the
+   intended deployment, not a throughput ceiling to be lifted. Horizontal
+   scaling and a shared session store are out of scope for the same reason.
 
 Contributing
 ------------
 
-1. Pick an item from the earliest incomplete milestone.
+1. Pick the earliest incomplete item from the *Priority backlog* above.
 2. Read :doc:`architecture` for the technical context.
 3. Follow the existing style, and build in the container.
 4. Add a test that fails without the change.
