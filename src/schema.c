@@ -19,6 +19,7 @@
 
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/schema.h>
+#include <sysrepo/mcp/libconfig.h>
 
 /* ---------------------------------------------------------------- schema_node_to_json
  *
@@ -28,7 +29,7 @@
  * absolute XPaths.
  *
  * Children are grouped under a `children` object keyed by name. A depth limit
- * (CONFIG_SYSREPO_MCP_SERVER_MAX_TREE_DEPTH) prevents unbounded recursion on deeply nested schemas.
+ * (mcp_config_get()->max_tree_depth) prevents unbounded recursion on deeply nested schemas.
  */
 
 struct json_object *
@@ -71,7 +72,7 @@ schema_node_to_json(const struct lysc_node *node, int with_desc, int depth,
 		json_object_array_add(flat, entry);
 	}
 
-	if (depth < CONFIG_SYSREPO_MCP_SERVER_MAX_TREE_DEPTH) {
+	if (depth < (int)mcp_config_get()->max_tree_depth) {
 		struct json_object *children = NULL;
 
 		for (child = lysc_node_child(node); child;

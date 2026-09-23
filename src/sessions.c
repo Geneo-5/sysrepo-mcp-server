@@ -25,6 +25,7 @@
 
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/sessions.h>
+#include <sysrepo/mcp/libconfig.h>
 
 /* --------------------------------------------------------------------- globals
  *
@@ -35,8 +36,14 @@
 
 /* ----------------------------------------------------------------------- globals */
 
-struct mcp_session               g_sessions[CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS];
-unsigned                         g_session_count;
+/* `g_sessions` est alloué dynamiquement après le chargement de la
+ * configuration.  Le pointeur vers mcp_config est gardé pour connaître
+ * le nombre maximum de sessions et accéder aux autres réglages (TTL,
+ * taille de la file, etc.).  */
+
+static struct mcp_config *g_cfg;
+struct mcp_session *g_sessions;
+unsigned                    g_session_count;
 
 /* ------------------------------------------------------------------ notif_clear
  *
@@ -68,7 +75,7 @@ session_drain(struct mcp_session *sess)
 	size_t i;
 
 	for (i = 0; i < sess->count; i++)
-		notif_clear(&sess->queue[(sess->head + i) % CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE]);
+		notif_clear(&sess->queue[(sess->head + i) % mcp_config_get()->notif_queue_size]);
 
 	sess->head = 0;
 	sess->count = 0;
@@ -121,7 +128,7 @@ session_destroy(struct mcp_session *sess)
 
 /* ------------------------------------------------------------------- sessions_expire
  *
- * Expire sessions that have been idle longer than `CONFIG_SYSREPO_MCP_SERVER_SESSION_TTL`. Called
+ * Expire sessions that have been idle longer than the configured TTL. Called
  * once per request (in `serve()`) so that timeout is enforced regardless of
  * whether the client explicitly DELETEs.
  */
@@ -132,13 +139,13 @@ sessions_expire(void)
 	time_t now = time(NULL);
 	size_t i;
 
-	for (i = 0; i < CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS; i++) {
+	for (i = 0; i < mcp_config_get()->max_sessions; i++) {
 		if (!g_sessions[i].in_use)
 			continue;
-		if (now - g_sessions[i].last_activity < CONFIG_SYSREPO_MCP_SERVER_SESSION_TTL)
+		if (now - g_sessions[i].last_activity < mcp_config_get()->session_ttl)
 			continue;
 
-		fprintf(stderr, PACKAGE_NAME ": session %s expired\n",
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": session %s expired\n",
 		        g_sessions[i].id);
 		session_destroy(&g_sessions[i]);
 	}
@@ -197,7 +204,7 @@ session_create(void)
 {
 	size_t i;
 
-	for (i = 0; i < CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS; i++) {
+	for (i = 0; i < mcp_config_get()->max_sessions; i++) {
 		struct mcp_session *sess = &g_sessions[i];
 
 		if (sess->in_use)
@@ -216,6 +223,49 @@ session_create(void)
 	return NULL;
 }
 
+/* ---------------------------------------------------------------- sessions_init
+ *
+ * Allocate the session array. Called once after `mcp_config_set()` so that
+ * `max_sessions` is known. Returns 0 on success, -1 when malloc fails (which
+ * is not expected but must be checked).
+ */
+
+int
+sessions_init(unsigned max_sessions)
+{
+	g_sessions = calloc(max_sessions, sizeof(*g_sessions));
+	if (!g_sessions) {
+		fprintf(stderr, CONFIG_PACKAGE_NAME
+		        ": cannot allocate %u sessions: %s\n",
+		        max_sessions, strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+/* ---------------------------------------------------------------- sessions_free
+ *
+ * Free every active session and the session array itself. Called once at
+ * shutdown, after all sessions have been destroyed by the client, or as a
+ * safety net if the server exits with active sessions.
+ */
+
+void
+sessions_free(void)
+{
+	size_t i;
+
+	if (!g_sessions)
+		return;
+
+	for (i = 0; i < mcp_config_get()->max_sessions; i++)
+		session_destroy(&g_sessions[i]);
+
+	free(g_sessions);
+	g_sessions = NULL;
+}
+
 /* -------------------------------------------------------------------- session_find
  *
  * Linear search through `g_sessions` for a session matching `id`. Returns NULL
@@ -230,7 +280,7 @@ session_find(const char *id)
 	if (!id || !*id)
 		return NULL;
 
-	for (i = 0; i < CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS; i++) {
+	for (i = 0; i < mcp_config_get()->max_sessions; i++) {
 		if (g_sessions[i].in_use && !strcmp(g_sessions[i].id, id))
 			return &g_sessions[i];
 	}
@@ -254,7 +304,7 @@ sessions_process_events(void)
 	struct mcp_subscription *sub;
 	size_t                   i;
 
-	for (i = 0; i < CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS; i++) {
+	for (i = 0; i < mcp_config_get()->max_sessions; i++) {
 		if (!g_sessions[i].in_use)
 			continue;
 
@@ -279,17 +329,17 @@ session_push_notif(struct mcp_session *sess, const char *path, const char *json,
 {
 	struct mcp_notif *slot;
 
-	if (sess->count == CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE) {
+	if (sess->count == mcp_config_get()->notif_queue_size) {
 		/* A full queue means the agent stopped polling. Dropping the
 		 * oldest keeps the most recent events, which are the ones it
 		 * is behind on; the count is reported so it knows. */
 		notif_clear(&sess->queue[sess->head]);
-		sess->head = (sess->head + 1) % CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE;
+		sess->head = (sess->head + 1) % mcp_config_get()->notif_queue_size;
 		sess->count--;
 		sess->total_dropped++;
 	}
 
-	slot = &sess->queue[(sess->head + sess->count) % CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE];
+	slot = &sess->queue[(sess->head + sess->count) % mcp_config_get()->notif_queue_size];
 	slot->path = path ? strdup(path) : NULL;
 	slot->json = json ? strdup(json) : NULL;
 	slot->kind = kind ? strdup(kind) : NULL;

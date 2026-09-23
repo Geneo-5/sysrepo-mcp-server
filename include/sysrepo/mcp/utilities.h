@@ -8,7 +8,7 @@
 #ifndef _SYSREPO_MCP_UTILITIES_H
 #define _SYSREPO_MCP_UTILITIES_H
 
-#include <sysrepo/mcp/config.h>
+#include "config.h"
 #include <json-c/json.h>
 #include <sysrepo.h>
 

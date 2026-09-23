@@ -8,7 +8,13 @@
 #ifndef _SYSREPO_MCP_SESSIONS_H
 #define _SYSREPO_MCP_SESSIONS_H
 
-#include <sysrepo/mcp/config.h>
+/* config.h (autoconf-generated) defines CONFIG_SYSREPO_MCP_SERVER_*
+ * macros used for the fixed-size arrays below.  We include it here
+ * directly because config.h (below) no longer transitively includes it.  */
+
+#include "config.h"
+
+#include <sysrepo/mcp/libconfig.h>
 #include <sys/time.h>
 
 #ifdef __cplusplus
@@ -56,7 +62,9 @@ struct mcp_session {
 	struct mcp_subscription *subs;
 	uint32_t                 next_sub_id;
 
-	/* Ring buffer of notifications waiting to be polled. */
+	/* Ring buffer of notifications waiting to be polled.
+	 * Size is a compile-time upper bound; the runtime limit is
+	 * used by the queue push/pull code. */
 	struct mcp_notif queue[CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE];
 	size_t           head;
 	size_t           count;
@@ -64,9 +72,13 @@ struct mcp_session {
 	uint64_t         total_dropped;
 };
 
-/* ------------------------------------------------------------------- globals */
+/* ------------------------------------------------------------------- globals
+ *
+ * `g_sessions` est alloué dynamiquement après le chargement de la
+ * configuration (le nombre maximum est lu dans le fichier de config).
+ */
 
-extern struct mcp_session g_sessions[CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS];
+extern struct mcp_session *g_sessions;
 extern unsigned g_session_count;
 
 void session_drain(struct mcp_session *session);
@@ -85,6 +97,8 @@ void notif_callback(sr_session_ctx_t *session, uint32_t sub_id,
 		    const sr_ev_notif_type_t type, const struct lyd_node *notif,
 		    struct timespec *timestamp, void *private_data);
 int session_sysrepo(struct mcp_session *sess, struct mcp_err *err);
+int  sessions_init(unsigned max_sessions);
+void sessions_free(void);
 
 #ifdef __cplusplus
 }

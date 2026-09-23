@@ -17,6 +17,7 @@
 
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/operational.h>
+#include <sysrepo/mcp/libconfig.h>
 
 /* ----------------------------------------------------- sr_get_operational
  *
@@ -34,7 +35,7 @@ tool_sr_get_operational(struct tool_ctx *ctx, struct json_object *args,
 	struct json_object *payload;
 	int                 max_depth = arg_int(args, "max_depth", 0);
 	int                 timeout = arg_int(args, "timeout_ms",
-	                                      CONFIG_SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS);
+	                                      mcp_config_get()->default_timeout_ms);
 	int                 rc;
 
 	if (!xpath)

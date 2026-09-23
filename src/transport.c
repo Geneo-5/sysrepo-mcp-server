@@ -22,6 +22,7 @@
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/sessions.h>
 #include <sysrepo/mcp/transport.h>
+#include <sysrepo/mcp/libconfig.h>
 
 /* External state from main.c. */
 
@@ -156,7 +157,7 @@ method_initialize(FCGX_Request *req, struct json_object *id)
 
 		mcp_err_set(&err, MCP_ERR_SERVER, "Server error",
 		            "the maximum of %d concurrent sessions is reached",
-		            CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS);
+		            mcp_config_get()->max_sessions);
 		rpc_send_error(req, 503, id, &err);
 		return;
 	}
@@ -171,9 +172,9 @@ method_initialize(FCGX_Request *req, struct json_object *id)
 	json_object_object_add(caps, "tools", tools_cap);
 
 	json_object_object_add(info, "name",
-	                       json_object_new_string(PACKAGE_NAME));
+	                       json_object_new_string(CONFIG_PACKAGE_NAME));
 	json_object_object_add(info, "version",
-	                       json_object_new_string(PACKAGE_VERSION));
+	                       json_object_new_string(CONFIG_PACKAGE_VERSION));
 
 	json_object_object_add(result, "protocolVersion",
 	                       json_object_new_string(MCP_PROTOCOL_VERSION));
@@ -184,7 +185,7 @@ method_initialize(FCGX_Request *req, struct json_object *id)
 	 * the Streamable HTTP binding puts it, and where a client looks. */
 	snprintf(header, sizeof(header), "Mcp-Session-Id: %s\r\n", sess->id);
 
-	fprintf(stderr, PACKAGE_NAME ": session %s created\n", sess->id);
+	fprintf(stderr, CONFIG_PACKAGE_NAME ": session %s created\n", sess->id);
 
 	rpc_send_result(req, header, id, result);
 }
@@ -458,7 +459,7 @@ serve(FCGX_Request *req)
 			return;
 		}
 
-		fprintf(stderr, PACKAGE_NAME ": session %s deleted\n", mcp->id);
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": session %s deleted\n", mcp->id);
 		session_destroy(mcp);
 		FCGX_FPrintF(req->out, "Status: 204\r\n\r\n");
 		return;

@@ -19,6 +19,7 @@
 
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/rpc.h>
+#include <sysrepo/mcp/libconfig.h>
 
 /*
  * Both sr_execute_rpc and sr_action share the same implementation.
@@ -45,7 +46,7 @@ rpc_common(struct tool_ctx *ctx, struct json_object *args, struct mcp_err *err)
 	struct json_object  *res;
 	struct json_object  *payload;
 	int                  timeout = arg_int(args, "timeout_ms",
-	                                       CONFIG_SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS);
+	                                       mcp_config_get()->default_timeout_ms);
 	int                  rc;
 
 	xpath = arg_xpath(args, err);

@@ -8,7 +8,8 @@
 #ifndef _SYSREPO_MCP_CONFIG_TOOLS_H
 #define _SYSREPO_MCP_CONFIG_TOOLS_H
 
-#include <sysrepo/mcp/config.h>
+#include "config.h"
+#include <sysrepo/mcp/libconfig.h>
 
 #ifdef __cplusplus
 extern "C" {

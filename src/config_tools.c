@@ -21,6 +21,7 @@
 
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/config_tools.h>
+#include <sysrepo/mcp/libconfig.h>
 
 /* ---------------------------------------------------------------- sr_get_config
  */
@@ -61,7 +62,7 @@ tool_sr_get_config(struct tool_ctx *ctx, struct json_object *args,
 	}
 
 	rc = sr_get_data(ctx->sess, xpath, (uint32_t)max_depth,
-	                 CONFIG_SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS, 0, &data);
+	                 mcp_config_get()->default_timeout_ms, 0, &data);
 	if (rc != SR_ERR_OK) {
 		mcp_err_from_session(err, ctx->sess, rc, "sr_get_data");
 		return NULL;
@@ -176,7 +177,7 @@ tool_sr_edit_config(struct tool_ctx *ctx, struct json_object *args,
 		return NULL;
 	}
 
-	rc = sr_apply_changes(ctx->sess, CONFIG_SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS);
+	rc = sr_apply_changes(ctx->sess, mcp_config_get()->default_timeout_ms);
 	if (rc != SR_ERR_OK) {
 		mcp_err_from_session(err, ctx->sess, rc, "sr_apply_changes");
 		sr_discard_changes(ctx->sess);
@@ -235,7 +236,7 @@ tool_sr_delete_config(struct tool_ctx *ctx, struct json_object *args,
 		int        rc2;
 
 		rc2 = sr_get_data(ctx->sess, xpath, 0,
-		                   CONFIG_SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS, 0, &data);
+		                   mcp_config_get()->default_timeout_ms, 0, &data);
 		if (rc2 != SR_ERR_OK) {
 			mcp_err_from_session(err, ctx->sess, rc2,
 			                     "sr_get_data");
@@ -258,7 +259,7 @@ tool_sr_delete_config(struct tool_ctx *ctx, struct json_object *args,
 		return NULL;
 	}
 
-	rc = sr_apply_changes(ctx->sess, CONFIG_SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS);
+	rc = sr_apply_changes(ctx->sess, mcp_config_get()->default_timeout_ms);
 	if (rc != SR_ERR_OK) {
 		mcp_err_from_session(err, ctx->sess, rc, "sr_apply_changes");
 		sr_discard_changes(ctx->sess);

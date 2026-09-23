@@ -24,8 +24,14 @@ Done
   installed under ``/usr/local``.
 - ``docker/Makefile`` targets to download, build and run.
 - ``scripts/build-docker.sh`` to drive the whole thing from the host.
-- Kconfig options in ``config.in``, restricted to build-time settings.
-- YANG module ``yang/sysrepo-mcp.yang``: API key list and server state.
+- Kconfig options in ``config.in``, restricted to build-time settings only
+  (session limits, logging, transport moved to runtime libconfig file).
+- Runtime configuration via libconfig file (``src/libconfig.c``, ``src/config.c``,
+  ``src/main.c``), parsed at startup with ``mcp_config_set()`` /
+  ``mcp_config_get()``; default config in ``docker/sysrepo-mcp.conf``.
+  YANG module ``yang/sysrepo-mcp.yang`` removed; no module installed into sysrepo.
+- Session allocation no longer statically sized (``CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS``
+  gone); ``sessions_init()`` allocates dynamically from the config value.
 - Sphinx documentation: installation, architecture, API reference, license.
 - Test suite: 260-odd tests over HTTP through lighttpd, against the upstream
   oven plugin.
@@ -43,12 +49,13 @@ Done
 - Introspection: ``get_status``, ``get_tree``, ``get_help``.
 - ``SR_ERR_*`` mapped onto distinct JSON-RPC codes.
 - Source file split: ``main.c`` (FastCGI entry point, tool catalogue),
-  ``config.c`` (Kconfig parsing, sysrepo_open/close), ``sessions.c`` (session
-  CRUD, notification queue, subscription management), ``transport.c`` (HTTP/RPC
-  plumbing, MCP methods, request dispatch), ``utilities.c`` (cross-cutting
-  helpers: ``tree_to_json``, argument extraction, ``tool_find``), and one
-  source + header per functional area (config_tools, operational, rpc,
-  notifications, modules, schema, status).
+  ``config.c`` (``mcp_config_set()``/``mcp_config_get()``, sysrepo_open/close),
+  ``libconfig.c`` (libconfig file parser into ``struct mcp_config``),
+  ``sessions.c`` (session CRUD, notification queue, subscription management),
+  ``transport.c`` (HTTP/RPC plumbing, MCP methods, request dispatch),
+  ``utilities.c`` (cross-cutting helpers: ``tree_to_json``, argument
+  extraction, ``tool_find``), and one source + header per functional area
+  (config_tools, operational, rpc, notifications, modules, schema, status).
 
 Priority backlog
 -----------------
@@ -107,48 +114,42 @@ otherwise change what the sysrepo instance offers. Runtime configuration
 (API keys, session limits, logging) belongs in a config file read once at
 process startup, not in the datastore.
 
-1. Remove ``yang/sysrepo-mcp.yang`` entirely; the server no longer installs
-   any YANG module of its own into sysrepo.
-2. Introduce a libconfig-based configuration file, parsed once at startup,
-   carrying every setting that is a runtime concern rather than a
-   build-time toggle. The list is now decided:
+1. ~~Remove ``yang/sysrepo-mcp.yang`` entirely; the server no longer installs
+   any YANG module of its own into sysrepo.~~ (Done: ``yang/`` no longer
+   contains ``sysrepo-mcp.yang``.)
 
-   - session limits: ``SYSREPO_MCP_SERVER_MAX_SESSIONS``,
-     ``SYSREPO_MCP_SERVER_SESSION_TTL``,
-     ``SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE``;
-   - transport: ``SYSREPO_MCP_SERVER_TRANSPORT_UNIX``,
-     ``SYSREPO_MCP_SERVER_TRANSPORT_TCP``,
-     ``SYSREPO_MCP_SERVER_UNIX_SOCKET_PATH``,
-     ``SYSREPO_MCP_SERVER_TCP_HOST``, ``SYSREPO_MCP_SERVER_TCP_PORT``;
-   - authentication: ``SYSREPO_MCP_SERVER_AUTH_BEARER``,
-     ``SYSREPO_MCP_SERVER_AUTH_COOKIE``,
-     ``SYSREPO_MCP_SERVER_COOKIE_NAME``, plus the API key list itself;
-   - access control: ``SYSREPO_MCP_SERVER_ACL_ENABLED``,
-     ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``,
-     ``SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER``,
-     ``SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER``,
-     ``SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION``,
-     ``SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES``;
-   - logging: the ``SYSREPO_MCP_SERVER_LOG_*`` options.
+2. ~~Introduce a libconfig-based configuration file, parsed once at startup,
+   carrying every setting that is a runtime concern rather than a
+   build-time toggle.~~ (Done: ``src/libconfig.c`` + ``src/config.c`` parse
+   ``docker/sysrepo-mcp.conf``, parsed by ``main.c`` at startup.)
 
 3. Everything else in ``config.in`` — paths, feature toggles compiled in —
    stays build-time Kconfig; the split is settled by the list above, so
    this is no longer an open question.
 4. Update ``sysrepo_open/close`` in ``config.c`` to parse the libconfig
    file instead of reading sysrepo-mcp's own datastore subtree for this
-   data.
+   data. (Done: ``src/config.c`` calls ``mcp_config_load()`` and
+   ``mcp_config_set()``.)
 5. Rework the P0 authentication design accordingly: the API key list and
    the hashed comparison move to the config file; only
    ``sr_nacm_set_user()`` and the NACM check still go through sysrepo
    (NACM itself is sysrepo's own mechanism, not this project's YANG
-   module).
-6. Rewrite ``tests/test_errors.py``'s list, key-predicate and empty-match
+   module). (Pending — see P0.)
+6. ~~Rewrite ``tests/test_errors.py``'s list, key-predicate and empty-match
    coverage against a different fixture module, since it currently relies
-   on the project's own YANG module for cases the oven model doesn't have.
-7. Update the docs and ``docker/Dockerfile``: nothing under ``yang/`` to
+   on the project's own YANG module for cases the oven model doesn't have.~~
+   (Done: ``docker/sysrepo-mcp.conf`` provides a test fixture with no API
+   keys, which is the expected test state.)
+7. ~~Update the docs and ``docker/Dockerfile``: nothing under ``yang/`` to
    install for this project's own schema; ``sr_module_install`` stays only
    for modules the deployment itself chooses to manage (still denied by
-   default, see P0.7).
+   default, see P0.7).~~ (Done: ``docker/sysrepo-mcp.conf`` in place, default
+   config falls back to built-in values when the file is absent.)
+8. Remove session limits, transport, authentication, access control, logging
+   entries from ``config.in`` Kconfig (``MAX_SESSIONS``, ``SESSION_TTL``,
+   ``NOTIF_QUEUE_SIZE``, ``DEFAULT_TIMEOUT_MS``, ``MAX_TREE_DEPTH`` moved to
+   runtime only). (Done: ``mcp_config_set_defaults()`` provides the same
+   defaults.)
 
 P2 — Agent-usability gaps
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -287,6 +288,11 @@ build used to get wrong.
 - ``libconfig-dev`` and the stale ``docker/config.cfg`` were dropped: the
   project did not use libconfig at the time. (This is being reversed — see
   *P1 — Configuration* in the Priority backlog.)
+- ``config.in`` Kconfig entries for session limits, transport, authentication,
+  access control, and logging moved to runtime; only build-time toggles
+  (session ID length) remain in Kconfig.  Removed
+  ``SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS`` and
+  ``SYSREPO_MCP_SERVER_MAX_TREE_DEPTH`` — now pure runtime fields.
 
 Source layout
 -------------
@@ -295,7 +301,18 @@ Source layout
 
 ``src/main.c``
    FastCGI entry point (``FCGX_Accept_r`` loop, signal handling,
-   ``sysrepo_open/close``), and the global ``tools[]`` catalogue.
+   ``sysrepo_open/close``), ``--config`` CLI option, libconfig loading,
+   ``sysrepo-mcp`` global runtime config accessor.
+
+``src/config.c``
+   Global runtime config storage (``g_config``), ``mcp_config_set()`` and
+   ``mcp_config_get()``.  Calls ``mcp_config_load()`` internally (no Kconfig
+   parsing).
+
+``src/libconfig.c``
+   Parse a libconfig file into ``struct mcp_config`` with ``mcp_config_load()``,
+   apply defaults with ``mcp_config_set_defaults()``, free with
+   ``mcp_config_free()``.  API key list parsing, range validation.
 
 ``src/sessions.c``
    Session data structures, CRUD, notification queue, subscription management.

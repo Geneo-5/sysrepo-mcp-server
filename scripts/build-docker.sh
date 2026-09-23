@@ -203,7 +203,7 @@ docker run --rm -u "${DOCKER_UID}" \
     -v "${PROJECT_DIR}:${PROJECT_DIR}" \
     -w "${PROJECT_DIR}" \
     "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-    make  EXTRA_CFLAGS="${EXTRA_CFLAGS}" EXTRA_LDFLAGS="${EXTRA_LDFLAGS}" defconfig build
+    make  EXTRA_CFLAGS="${EXTRA_CFLAGS}" EXTRA_LDFLAGS="${EXTRA_LDFLAGS}" clean defconfig build
 
 log_info "Build complete. Binary: ${PROJECT_DIR}/build/sysrepo-mcp"
 

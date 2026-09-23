@@ -17,6 +17,7 @@
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/sessions.h>
 #include <sysrepo/mcp/notifications.h>
+#include <sysrepo/mcp/libconfig.h>
 
 /* ---------------------------------------------------------------- subscription_find
  *
@@ -203,7 +204,7 @@ tool_sr_notif_unsubscribe(struct tool_ctx *ctx, struct json_object *args,
 			 * explicit unsubscribes. */
 			while (ctx->mcp->count > 0) {
 				size_t index = ctx->mcp->head %
-				               CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE;
+				               mcp_config_get()->notif_queue_size;
 				if (strcmp(
 				    ctx->mcp->queue[index].kind,
 				    "terminated") != 0)
@@ -212,7 +213,7 @@ tool_sr_notif_unsubscribe(struct tool_ctx *ctx, struct json_object *args,
 				    &ctx->mcp->queue[index]);
 				ctx->mcp->head =
 				    (ctx->mcp->head + 1) %
-				    CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE;
+				    mcp_config_get()->notif_queue_size;
 				ctx->mcp->count--;
 			}
 		}
@@ -310,7 +311,7 @@ tool_sr_notif_poll(struct tool_ctx *ctx, struct json_object *args,
 
 	while (taken < available) {
 		size_t            index = (ctx->mcp->head + taken) %
-		                          CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE;
+		                          mcp_config_get()->notif_queue_size;
 		struct mcp_notif *notif = &ctx->mcp->queue[index];
 		struct json_object *entry = json_object_new_object();
 
@@ -342,9 +343,9 @@ tool_sr_notif_poll(struct tool_ctx *ctx, struct json_object *args,
 
 		for (i = 0; i < taken; i++)
 			notif_clear(&ctx->mcp->queue[(ctx->mcp->head + i) %
-			                             CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE]);
+			                             mcp_config_get()->notif_queue_size]);
 
-		ctx->mcp->head = (ctx->mcp->head + taken) % CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE;
+		ctx->mcp->head = (ctx->mcp->head + taken) % mcp_config_get()->notif_queue_size;
 		ctx->mcp->count -= taken;
 	}
 

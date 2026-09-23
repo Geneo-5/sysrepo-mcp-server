@@ -26,7 +26,7 @@
 #ifndef _SYSREPO_MCP_SERVER_H
 #define _SYSREPO_MCP_SERVER_H
 
-#include <sysrepo/mcp/config.h>
+#include "config.h"
 
 #ifdef __cplusplus
 extern "C" {

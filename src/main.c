@@ -25,6 +25,7 @@
 #include <sysrepo/mcp/sessions.h>
 #include <sysrepo/mcp/transport.h>
 #include <sysrepo/mcp/config_tools.h>
+#include <sysrepo/mcp/libconfig.h>
 #include <sysrepo/mcp/operational.h>
 #include <sysrepo/mcp/rpc.h>
 #include <sysrepo/mcp/modules.h>
@@ -235,24 +236,28 @@ static void
 usage(FILE *out)
 {
 	fprintf(out,
-		        PACKAGE_NAME " " PACKAGE_VERSION
-		        " - MCP server for the sysrepo datastore\n"
-		        "\n"
-		        "Usage: " PACKAGE_NAME " [--help] [--version]\n"
-		        "\n"
-		        "  --help     print this message and exit\n"
-		        "  --version  print the version and exit\n"
-		        "\n"
-		        "With no argument, " PACKAGE_NAME " expects to be started as a\n"
-		        "FastCGI application by a web server. Sessions are held in this\n"
-		        "process, so the FastCGI configuration must use max-procs = 1.\n");
+		CONFIG_PACKAGE_NAME " " CONFIG_PACKAGE_VERSION
+		" - MCP server for the sysrepo datastore\n"
+		"\n"
+		"Usage: " CONFIG_PACKAGE_NAME " [ --config <file> ]\n"
+		"             [ --help ] [ --version ]\n"
+		"\n"
+		"  --config    path to the libconfig file\n"
+		"              (default: /etc/sysrepo-mcp/" CONFIG_PACKAGE_NAME
+		".conf)\n"
+		"  --help      print this message and exit\n"
+		"  --version   print the version and exit\n"
+		"\n"
+		"With no argument, " CONFIG_PACKAGE_NAME " expects to be started as a\n"
+		"FastCGI application by a web server. Sessions are held in this\n"
+		"process, so the FastCGI configuration must use max-procs = 1.\n");
 }
 
 /* ---------------------------------------------------------------- sysrepo_open/close
-	 *
-	 * Wrappers around the sysrepo 5.x API (sr_connect/sr_disconnect) to preserve
-	 * the original 3.x interface.  Called once at startup and shutdown.
-	 */
+ *
+ * Wrappers around the sysrepo 5.x API (sr_connect/sr_disconnect) to preserve
+ * the original 3.x interface.  Called once at startup and shutdown.
+ */
 
 static int
 sysrepo_open(void)
@@ -260,13 +265,13 @@ sysrepo_open(void)
 	int rc;
 
 	if ((rc = sr_connect(0, &g_conn)) != SR_ERR_OK) {
-		fprintf(stderr, PACKAGE_NAME ": sr_connect: %s\n",
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": sr_connect: %s\n",
 		        sr_strerror(rc));
 		return rc;
 	}
 	ly_ctx = sr_acquire_context(g_conn);
 	if (ly_ctx == NULL) {
-		fprintf(stderr, PACKAGE_NAME ": sr_acquire_context: failed\n");
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": sr_acquire_context: failed\n");
 		sr_disconnect(g_conn);
 		g_conn = NULL;
 		return -1;
@@ -289,6 +294,7 @@ main(int argc, char *argv[])
 {
 	FCGX_Request     req;
 	struct sigaction sa;
+	const char       *config_path = "/etc/sysrepo-mcp/sysrepo-mcp.conf";
 	size_t           i;
 	int              arg;
 
@@ -298,17 +304,21 @@ main(int argc, char *argv[])
 			return EXIT_SUCCESS;
 		}
 		if (!strcmp(argv[arg], "--version")) {
-			printf(PACKAGE_NAME " " PACKAGE_VERSION "\n");
+			printf(CONFIG_PACKAGE_NAME " " CONFIG_PACKAGE_VERSION "\n");
 			return EXIT_SUCCESS;
 		}
-		fprintf(stderr, PACKAGE_NAME ": unknown option \"%s\"\n",
+		if (!strcmp(argv[arg], "--config") && arg + 1 < argc) {
+			config_path = argv[++arg];
+			continue;
+		}
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": unknown option \"%s\"\n",
 		        argv[arg]);
 		usage(stderr);
 		return EXIT_FAILURE;
 	}
 
 	if (FCGX_Init()) {
-		fprintf(stderr, PACKAGE_NAME ": FCGX_Init failed\n");
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": FCGX_Init failed\n");
 		return EXIT_FAILURE;
 	}
 
@@ -319,7 +329,7 @@ main(int argc, char *argv[])
 	 */
 	if (FCGX_IsCGI()) {
 		fprintf(stderr,
-		        PACKAGE_NAME ": not started as a FastCGI application.\n"
+		        CONFIG_PACKAGE_NAME ": not started as a FastCGI application.\n"
 		        "Run it behind a reverse proxy, or use --help.\n");
 		return EXIT_FAILURE;
 	}
@@ -328,7 +338,7 @@ main(int argc, char *argv[])
 	sa.sa_handler = on_signal;
 	sigemptyset(&sa.sa_mask);
 	if (sigaction(SIGINT, &sa, NULL) || sigaction(SIGTERM, &sa, NULL)) {
-		fprintf(stderr, PACKAGE_NAME ": sigaction: %s\n",
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": sigaction: %s\n",
 		        strerror(errno));
 		return EXIT_FAILURE;
 	}
@@ -339,26 +349,45 @@ main(int argc, char *argv[])
 
 	g_start_time = time(NULL);
 
-	if (FCGX_InitRequest(&req, 0, 0)) {
-		fprintf(stderr, PACKAGE_NAME ": FCGX_InitRequest failed\n");
+	/* Load runtime configuration from libconfig file. */
+
+	struct mcp_config cfg;
+
+	mcp_config_set_defaults(&cfg);
+
+	if (mcp_config_load(config_path, &cfg) < 0)
+		fprintf(stderr, CONFIG_PACKAGE_NAME
+			": warning: could not load config file, "
+			"using built-in defaults\n");
+	mcp_config_set(&cfg);
+
+	if (sessions_init(mcp_config_get()->max_sessions) < 0) {
+		mcp_config_free(&cfg);
 		sysrepo_close();
 		return EXIT_FAILURE;
 	}
 
-	fprintf(stderr, PACKAGE_NAME " " PACKAGE_VERSION ": ready\n");
+	mcp_config_free(&cfg);
+
+	if (FCGX_InitRequest(&req, 0, 0)) {
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": FCGX_InitRequest failed\n");
+		sysrepo_close();
+		return EXIT_FAILURE;
+	}
+
+	fprintf(stderr, CONFIG_PACKAGE_NAME " " CONFIG_PACKAGE_VERSION ": ready\n");
 
 	while (!stopping && FCGX_Accept_r(&req) >= 0) {
 		serve(&req);
 		FCGX_Finish_r(&req);
 	}
 
-	for (i = 0; i < CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS; i++)
-		session_destroy(&g_sessions[i]);
+	sessions_free();
 
 	FCGX_Free(&req, 1);
 	sysrepo_close();
 
-	fprintf(stderr, PACKAGE_NAME ": stopped\n");
+	fprintf(stderr, CONFIG_PACKAGE_NAME ": stopped\n");
 
 	return EXIT_SUCCESS;
 }

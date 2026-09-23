@@ -24,7 +24,7 @@
 #ifndef _SYSREPO_MCP_LIBCONFIG_H
 #define _SYSREPO_MCP_LIBCONFIG_H
 
-#include <sysrepo/mcp/config.h>
+#include "config.h"
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -57,6 +57,10 @@ struct mcp_config {
 	unsigned max_sessions;		/* SYSREPO_MCP_SERVER_MAX_SESSIONS */
 	unsigned session_ttl;		/* SYSREPO_MCP_SERVER_SESSION_TTL */
 	unsigned notif_queue_size;	/* SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE */
+	unsigned default_timeout_ms;	/* runtime default timeout for sysrepo ops */
+
+	/* schema introspection */
+	unsigned max_tree_depth;	/* SYSREPO_MCP_SERVER_MAX_TREE_DEPTH */
 
 	/* server.transport -- mutually exclusive, like the Kconfig choice
 	 * it replaces. "mode" in the file is "unix" or "tcp". */
@@ -118,6 +122,15 @@ void mcp_config_free(struct mcp_config *cfg);
  * or NULL if @key is not configured. */
 const char *mcp_config_find_key(const struct mcp_config *cfg,
 				const char *key);
+
+/** Install @cfg as the runtime configuration.  Called once at startup
+ * after mcp_config_load().  Subsequent calls overwrite the previous value.
+ * The caller retains ownership of @cfg. */
+void mcp_config_set(const struct mcp_config *cfg);
+
+/** Return the current runtime configuration.  The returned pointer is valid
+ * until the next mcp_config_set() or program exit. */
+const struct mcp_config *mcp_config_get(void);
 
 #ifdef __cplusplus
 }

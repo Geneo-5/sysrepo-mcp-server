@@ -19,6 +19,7 @@
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/sessions.h>
 #include <sysrepo/mcp/status.h>
+#include <sysrepo/mcp/libconfig.h>
 
 /* External state from main.c. */
 extern time_t g_start_time;
@@ -39,23 +40,23 @@ tool_get_status(struct tool_ctx *ctx, struct json_object *args,
 
 	res = json_object_new_object();
 	json_object_object_add(res, "version",
-	                       json_object_new_string(PACKAGE_VERSION));
+	                       json_object_new_string(CONFIG_PACKAGE_VERSION));
 	json_object_object_add(res, "uptime_seconds",
 	                       json_object_new_int64(
 		                               (int64_t)(time(NULL) - g_start_time)));
 	json_object_object_add(res, "active_sessions",
 	                       json_object_new_int((int)g_session_count));
 	json_object_object_add(res, "max_sessions",
-	                       json_object_new_int(CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS));
+	                       json_object_new_int(mcp_config_get()->max_sessions));
 	json_object_object_add(res, "session_ttl_seconds",
-	                       json_object_new_int(CONFIG_SYSREPO_MCP_SERVER_SESSION_TTL));
+	                       json_object_new_int(mcp_config_get()->session_ttl));
 
 	if (arg_bool(args, "verbose", 0)) {
 		struct json_object *list = json_object_new_array();
 		time_t              now = time(NULL);
 		size_t              i;
 
-		for (i = 0; i < CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS; i++) {
+		for (i = 0; i < mcp_config_get()->max_sessions; i++) {
 			struct mcp_session *sess = &g_sessions[i];
 			struct json_object *entry;
 			struct mcp_subscription *sub;

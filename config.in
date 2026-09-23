@@ -10,39 +10,14 @@
 # Configuration options that affect runtime behavior are in yang/sysrepo-mcp.yang
 # =============================================================================
 
-config SYSREPO_MCP_SERVER_MAX_SESSIONS
-	int
-	range 1 1024
-	default 64
-	help
-		Maximum number of concurrent MCP sessions.
+config PACKAGE_NAME
+	string
+	default "sysrepo-mcp"
 
-		Past this number, initialize is refused with HTTP 503. Each
-		session carries its notification subscriptions and its
-		notification queue, so this bounds the memory the server can
-		be made to hold.
+config PACKAGE_VERSION
+	string 
+	default "0.0.0-unknown"
 
-config SYSREPO_MCP_SERVER_SESSION_TTL
-	int
-	range 60 86400
-	default 1800
-	help
-		Seconds of inactivity after which a session is destroyed,
-		along with its subscriptions and its pending notifications.
-
-		A client whose session expired gets HTTP 404 and is expected
-		to call initialize again.
-
-config SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE
-	int
-	range 8 65536
-	default 256
-	help
-		Notifications buffered per session between two polls.
-
-		When the queue is full the oldest entry is dropped and the
-		count is reported by sr_notif_poll, so an agent polling too
-		slowly is told rather than silently missing events.
 
 # =============================================================================
 # FASTCGI TRANSPORT
@@ -216,20 +191,3 @@ config SYSREPO_MCP_SERVER_LOG_CONSOLE
 
 			A 32-character ID carries 128 bits of entropy from
 			/dev/urandom, which is sufficient to prevent guessing.
-
-	config SYSREPO_MCP_SERVER_MAX_TREE_DEPTH
-		int
-		range 1 128
-		default 32
-		help
-			Maximum depth when walking a YANG schema tree.
-
-			Prevents unbounded recursion on deeply nested schemas.
-
-	config SYSREPO_MCP_SERVER_DEFAULT_TIMEOUT_MS
-		int
-		range 100 60000
-		default 5000
-		help
-			Default timeout in milliseconds for sysrepo operations
-			that accept a timeout argument (apply changes, get data).

@@ -8,7 +8,7 @@
 #ifndef _SYSREPO_MCP_SCHEMA_H
 #define _SYSREPO_MCP_SCHEMA_H
 
-#include <sysrepo/mcp/config.h>
+#include "config.h"
 #include <sysrepo.h>
 
 #ifdef __cplusplus

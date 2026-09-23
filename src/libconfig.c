@@ -36,6 +36,8 @@
 #define MCP_RANGE_SESSION_TTL_MAX        86400
 #define MCP_RANGE_NOTIF_QUEUE_SIZE_MIN   8
 #define MCP_RANGE_NOTIF_QUEUE_SIZE_MAX   65536
+#define MCP_RANGE_MAX_TREE_DEPTH_MIN     1
+#define MCP_RANGE_MAX_TREE_DEPTH_MAX     256
 #define MCP_RANGE_TCP_PORT_MIN           1
 #define MCP_RANGE_TCP_PORT_MAX           65535
 #define MCP_RANGE_LOG_LEVEL_MIN          0
@@ -58,7 +60,7 @@ xstrdup(const char *s)
 
 	out = strdup(s);
 	if (out == NULL)
-		fprintf(stderr, PACKAGE_NAME ": libconfig: out of memory "
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: out of memory "
 		        "duplicating \"%s\"\n", s);
 	return out;
 }
@@ -78,7 +80,7 @@ copy_string(char *dst, size_t dst_size, const char *src)
 
 	len = strlen(src);
 	if (len >= dst_size) {
-		fprintf(stderr, PACKAGE_NAME ": libconfig: value \"%s\" is "
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: value \"%s\" is "
 		        "too long (max %zu characters), truncating\n",
 		        src, dst_size - 1);
 		len = dst_size - 1;
@@ -94,9 +96,27 @@ static int
 check_range_uint(const char *name, long long value, long long min, long long max)
 {
 	if (value < min || value > max) {
-		fprintf(stderr, PACKAGE_NAME ": libconfig: %s = %lld is out "
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s = %lld is out "
 		        "of range [%lld, %lld]\n", name, value, min, max);
 		return -1;
+	}
+	return 0;
+}
+
+/* -------------------------------------------------------------------- load_schema
+ */
+
+static int
+load_schema(config_t *cc, struct mcp_config *cfg)
+{
+	long long v;
+
+	if (config_lookup_int(cc, "server.session.max_tree_depth", (int *)&v)) {
+		if (check_range_uint("server.session.max_tree_depth", v,
+		                     MCP_RANGE_MAX_SESSIONS_MIN,
+		                     MCP_RANGE_MAX_TREE_DEPTH_MAX))
+			return -1;
+		cfg->max_tree_depth = (unsigned)v;
 	}
 	return 0;
 }
@@ -112,6 +132,8 @@ mcp_config_set_defaults(struct mcp_config *cfg)
 	cfg->max_sessions      = 64;
 	cfg->session_ttl       = 1800;
 	cfg->notif_queue_size  = 256;
+	cfg->default_timeout_ms = 5000;
+	cfg->max_tree_depth    = 32;
 
 	cfg->transport_unix = 1;
 	cfg->transport_tcp  = 0;
@@ -170,6 +192,12 @@ load_session(config_t *cc, struct mcp_config *cfg)
 			return -1;
 		cfg->notif_queue_size = (unsigned)v;
 	}
+	if (config_lookup_int(cc, "server.session.default_timeout_ms", (int *)&v)) {
+		if (check_range_uint("server.session.default_timeout_ms", v, 100,
+		                     60000))
+			return -1;
+		cfg->default_timeout_ms = (unsigned)v;
+	}
 	return 0;
 }
 
@@ -191,7 +219,7 @@ load_transport(config_t *cc, struct mcp_config *cfg)
 			cfg->transport_unix = 0;
 			cfg->transport_tcp  = 1;
 		} else {
-			fprintf(stderr, PACKAGE_NAME ": libconfig: "
+			fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: "
 			        "server.transport.mode must be \"unix\" or "
 			        "\"tcp\", got \"%s\"\n", mode);
 			return -1;
@@ -234,7 +262,7 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 			cfg->auth_bearer = 0;
 			cfg->auth_cookie = 1;
 		} else {
-			fprintf(stderr, PACKAGE_NAME ": libconfig: "
+			fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: "
 			        "server.auth.method must be \"bearer\" or "
 			        "\"cookie\", got \"%s\"\n", method);
 			return -1;
@@ -253,7 +281,7 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 
 	list = calloc((size_t)count, sizeof(*list));
 	if (list == NULL) {
-		fprintf(stderr, PACKAGE_NAME ": libconfig: out of memory "
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: out of memory "
 		        "loading %d API key(s)\n", count);
 		return -1;
 	}
@@ -265,7 +293,7 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 		elem = config_setting_get_elem(keys, (unsigned)i);
 		if (!config_setting_lookup_string(elem, "key", &key_str) ||
 		    !config_setting_lookup_string(elem, "user", &user_str)) {
-			fprintf(stderr, PACKAGE_NAME ": libconfig: "
+			fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: "
 			        "server.auth.api_keys[%d] needs both \"key\" "
 			        "and \"user\"\n", i);
 			for (i--; i >= 0; i--) {
@@ -333,7 +361,7 @@ load_acl(config_t *cc, struct mcp_config *cfg)
 
 	joined = malloc(total_len);
 	if (joined == NULL) {
-		fprintf(stderr, PACKAGE_NAME ": libconfig: out of memory "
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: out of memory "
 		        "joining server.acl.allowed_modules\n");
 		return -1;
 	}
@@ -389,13 +417,15 @@ mcp_config_load(const char *path, struct mcp_config *cfg)
 	config_init(&cc);
 
 	if (!config_read_file(&cc, path)) {
-		fprintf(stderr, PACKAGE_NAME ": libconfig: %s:%d: %s\n",
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s:%d: %s\n",
 		        path, config_error_line(&cc), config_error_text(&cc));
 		config_destroy(&cc);
 		return -1;
 	}
 
 	rc = load_session(&cc, cfg);
+	if (rc == 0)
+		rc = load_schema(&cc, cfg);
 	if (rc == 0)
 		rc = load_transport(&cc, cfg);
 	if (rc == 0)
@@ -408,13 +438,13 @@ mcp_config_load(const char *path, struct mcp_config *cfg)
 	config_destroy(&cc);
 
 	if (rc == 0 && cfg->transport_unix && cfg->transport_tcp) {
-		fprintf(stderr, PACKAGE_NAME ": libconfig: %s: "
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s: "
 		        "server.transport.mode cannot be both unix and tcp\n",
 		        path);
 		return -1;
 	}
 	if (rc == 0 && cfg->auth_bearer && cfg->auth_cookie) {
-		fprintf(stderr, PACKAGE_NAME ": libconfig: %s: "
+		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s: "
 		        "server.auth.method cannot be both bearer and cookie\n",
 		        path);
 		return -1;

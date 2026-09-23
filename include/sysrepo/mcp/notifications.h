@@ -8,7 +8,7 @@
 #ifndef _SYSREPO_MCP_NOTIFICATIONS_H
 #define _SYSREPO_MCP_NOTIFICATIONS_H
 
-#include <sysrepo/mcp/config.h>
+#include "config.h"
 
 #ifdef __cplusplus
 extern "C" {
