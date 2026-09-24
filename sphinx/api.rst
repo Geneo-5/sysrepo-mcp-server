@@ -20,9 +20,12 @@ it answers, the tools it exposes, and the errors it returns.
    **planned**
       Specified here, not written yet.
 
-   Authentication and NACM are **not implemented**: every request is served
-   with the rights of the system user running the server. That is a property
-   of the whole API, not of one tool.
+   The server optionally supports authentication: when API keys are
+   configured, every request is bound to the user from the matching key,
+   and ACL filters may restrict operations for that user.  Without API
+   keys, every request is served with the rights of the system user
+   running the server.  That is a property of the whole API, not of one
+   tool.
 
 Protocol
 --------

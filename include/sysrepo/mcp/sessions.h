@@ -53,6 +53,7 @@ struct mcp_subscription {
 struct mcp_session {
 	int      in_use;
 	char     id[CONFIG_SYSREPO_MCP_SERVER_SESSION_ID_LEN];
+	char    *user;        /* NACM identity (from API key or cookie). */
 	time_t   created;
 	time_t   last_activity;
 
@@ -85,7 +86,7 @@ void session_drain(struct mcp_session *session);
 void session_destroy(struct mcp_session *session);
 void notif_clear(struct mcp_notif *notif);
 void sessions_expire(void);
-struct mcp_session *session_create(void);
+struct mcp_session *session_create(const char *user);
 void session_generate_id(char *out);
 struct mcp_session *session_find(const char *id);
 void sessions_process_events(void);

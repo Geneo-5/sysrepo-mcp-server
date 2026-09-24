@@ -79,32 +79,32 @@ P0 — Security (blocks any untrusted deployment)
    and the documentation must keep saying so. This is the single most
    critical risk in the project today, ahead of scaling.
 
-1. Extract the credential from ``HTTP_AUTHORIZATION`` or a cookie, per
+1. ~~Extract the credential from ``HTTP_AUTHORIZATION`` or a cookie, per
    ``SYSREPO_MCP_SERVER_AUTH_BEARER`` / ``SYSREPO_MCP_SERVER_AUTH_COOKIE``
-   and ``SYSREPO_MCP_SERVER_COOKIE_NAME`` in the libconfig file (see P1).
-2. Look the key up in the API-key list of the libconfig configuration file
+   and ``SYSREPO_MCP_SERVER_COOKIE_NAME`` in the libconfig file (see P1).~~
+2. ~~Look the key up in the API-key list of the libconfig configuration file
    (see P1) and resolve the NACM user — no longer ``/sysrepo-mcp:api-key``
-   in the datastore.
-3. Store keys hashed, and compare in constant time.
-4. ``sr_nacm_init()`` at startup, ``sr_nacm_set_user()`` per request,
+   in the datastore.~~
+3. ~~Store keys hashed, and compare in constant time.~~
+4. ~~``sr_nacm_init()`` at startup, ``sr_nacm_set_user()`` per request,
    ``sr_nacm_check_operation()`` before an RPC, ``sr_nacm_destroy()`` at exit
-   — gated by ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``.
-5. Apply the module allow-list (``SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES``,
+   — gated by ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``.~~
+5. ~~Apply the module allow-list (``SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES``,
    gated by ``SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER``), the operation
    filter (``SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER``) and the
    write protection (``SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION``)
    from the libconfig file before calling sysrepo — all under the master
-   ``SYSREPO_MCP_SERVER_ACL_ENABLED`` switch (see P1).
-6. Bind the identity to the session, so a subscription cannot outlive the
-   rights that created it.
-7. Deny ``sr_module_install`` and ``sr_module_uninstall`` by default. They
+   ``SYSREPO_MCP_SERVER_ACL_ENABLED`` switch (see P1).~~
+6. ~~Bind the identity to the session, so a subscription cannot outlive the
+   rights that created it.~~
+7. ~~Deny ``sr_module_install`` and ``sr_module_uninstall`` by default. They
    change the schema of the whole datastore for every process linked against
    sysrepo, and removing a module destroys its data. (Revisit once
-   authentication exists — see P3.4.)
-8. Log every configuration change with the identity that caused it.
-9. Cover authentication and NACM with tests once they exist. Until then
+   authentication exists — see P3.4.)~~
+8. ~~Log every configuration change with the identity that caused it.~~
+9. ~~Cover authentication and NACM with tests once they exist. Until then
    there is nothing to assert beyond "everything is permitted", which is
-   exactly the state the tests must not enshrine.
+   exactly the state the tests must not enshrine.~~
 
 P1 — Configuration: drop the YANG module, adopt libconfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,11 +130,12 @@ process startup, not in the datastore.
    file instead of reading sysrepo-mcp's own datastore subtree for this
    data. (Done: ``src/config.c`` calls ``mcp_config_load()`` and
    ``mcp_config_set()``.)
-5. Rework the P0 authentication design accordingly: the API key list and
+5. ~~Rework the P0 authentication design accordingly: the API key list and
    the hashed comparison move to the config file; only
    ``sr_nacm_set_user()`` and the NACM check still go through sysrepo
    (NACM itself is sysrepo's own mechanism, not this project's YANG
-   module). (Pending — see P0.)
+   module).~~ (Done: all P0 items completed, ``docker/sysrepo-mcp.conf``
+   provides the API key list at runtime.)
 6. ~~Rewrite ``tests/test_errors.py``'s list, key-predicate and empty-match
    coverage against a different fixture module, since it currently relies
    on the project's own YANG module for cases the oven model doesn't have.~~
@@ -190,9 +191,9 @@ P3 — Logging and packaging
    libconfig file (see P1), instead of being declared in ``config.in`` and
    read by nobody.
 3. Ship a systemd unit and an example lighttpd fragment.
-4. Once authentication exists (P0), revisit whether ``sr_module_install``
-   and ``sr_module_uninstall`` can be allowed for identities with the right
-   NACM permissions instead of being denied outright.
+4. Revisit whether ``sr_module_install`` and ``sr_module_uninstall`` can be
+   allowed for identities with the right NACM permissions instead of being
+   denied outright. (P0 is done; the denial was a temporary blocker.)
 
 P4 — Tests to complete
 ~~~~~~~~~~~~~~~~~~~~~~

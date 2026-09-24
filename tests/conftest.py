@@ -499,6 +499,7 @@ fastcgi.server = (
         "sysrepo-mcp" => (
             "socket"          => "{socket}",
             "bin-path"        => "{binary}",
+            "argv"            => ( "{config_path}" ),
             "check-local"     => "disable",
             "max-procs"       => 1,
             "bin-environment" => (
@@ -529,6 +530,7 @@ def mcp(
     transport and protocol tests still run when extern/ was never downloaded.
     """
     binary = _server_binary()
+    config_path = PROJECT_ROOT / "docker" / "sysrepo-mcp.conf"
 
     if not binary.is_file():
         pytest.skip(f"{binary} not found: build it with scripts/build-docker.sh")
@@ -553,9 +555,11 @@ def mcp(
             endpoint=MCP_ENDPOINT,
             socket=root / "mcp.sock",
             binary=binary,
+            config_path=str(config_path),
             repository=sysrepo_env["SYSREPO_REPOSITORY_PATH"],
             shm_prefix=sysrepo_env["SYSREPO_SHM_PREFIX"],
             ld_library_path=sysrepo_env.get("LD_LIBRARY_PATH", "/usr/local/lib"),
+            argv=binary,
         )
     )
 
@@ -653,6 +657,123 @@ def oven_session(mcp_oven: McpClient) -> McpClient:
     yield client
 
     client.close_session()
+
+
+# ---------------------------------------------------------------------------
+# Fixture: server with API keys (P0 auth)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def mcp_auth(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFactory
+             ) -> McpClient:
+    """
+    Start lighttpd in front of sysrepo-mcp with docker/sysrepo-mcp.conf.
+
+    Unlike the default *mcp*, this fixture passes the configuration file
+    containing *api_keys* so that every MCP endpoint enforces authentication
+    and ACL checks.
+
+    The fixture is session-scoped so tests can use a shared server with keys
+    enabled and verify that auth gates apply at every layer.
+    """
+    binary = _server_binary()
+    config_path = PROJECT_ROOT / "docker" / "sysrepo-mcp.conf"
+
+    if not binary.is_file():
+        pytest.skip(f"{binary} not found: build it with scripts/build-docker.sh")
+    if not os.access(binary, os.X_OK):
+        pytest.skip(f"{binary} is not executable")
+    if shutil.which("lighttpd") is None:
+        pytest.skip("lighttpd not found: build the container image first")
+
+    root = tmp_path_factory.mktemp("lighttpd_auth")
+    docroot = root / "www"
+    docroot.mkdir()
+
+    conf = root / "lighttpd.conf"
+    errorlog = root / "error.log"
+    conf.write_text(
+        LIGHTTPD_CONF.format(
+            docroot=docroot,
+            host=TEST_HOST,
+            port=TEST_PORT,
+            errorlog=errorlog,
+            pidfile=root / "lighttpd.pid",
+            endpoint=MCP_ENDPOINT,
+            socket=root / "mcp.sock",
+            binary=binary,
+            config_path=str(config_path),
+            repository=sysrepo_env["SYSREPO_REPOSITORY_PATH"],
+            shm_prefix=sysrepo_env["SYSREPO_SHM_PREFIX"],
+            ld_library_path=sysrepo_env.get("LD_LIBRARY_PATH", "/usr/local/lib"),
+            argv=binary,
+        )
+    )
+
+    proc = subprocess.Popen(
+        ["lighttpd", "-D", "-f", str(conf)],
+        env=sysrepo_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    if not _wait_for_port(TEST_HOST, TEST_PORT, STARTUP_TIMEOUT):
+        proc.terminate()
+        output = proc.communicate(timeout=5)[0].decode(errors="replace")
+        pytest.skip(
+            f"lighttpd did not listen on {TEST_HOST}:{TEST_PORT}.\n"
+            f"lighttpd output:\n{output}\n"
+            f"error log:\n{_tail(errorlog)}\n"
+            "If the port is the problem, set SYSREPO_MCP_TEST_PORT."
+        )
+
+    client = McpClient(TEST_HOST, TEST_PORT)
+
+    # A first request proves the FastCGI process really started: lighttpd
+    # spawns it lazily, so binding the port alone proves nothing.  With
+    # auth enabled, probe with the admin key so the server returns a real
+    # 200 rather than a 401.
+    try:
+        body = client.rpc("get_status", {"name": "get_status"})
+        probe = client.request(
+            body=body,
+            extra_headers={"Authorization": "Bearer test-admin-key-0001"},
+        )
+    except OSError as exc:  # pragma: no cover - environment failure
+        _, output = proc.communicate(timeout=5)
+        print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
+        pytest.skip(
+            f"cannot reach the server: {exc}\n{_tail(errorlog)}"
+        )
+
+    if probe.status != 200:
+        _, output = proc.communicate(timeout=5)
+        print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
+        proc.terminate()
+        pytest.fail(
+            f"the server answered HTTP {probe.status} to get_status.\n"
+            f"body: {probe.body!r}\n"
+            f"lighttpd error log:\n{_tail(errorlog)}"
+        )
+
+    # Debug: drain and print everything the server has written so far.
+    if proc.stdout is not None:
+        client._print_pipe(proc.stdout, "server stdout")
+    if proc.stderr is not None:
+        client._print_pipe(proc.stderr, "server stderr")
+
+    yield client
+
+    # When the fixture tears down, stop the server and print all output.
+    proc.send_signal(signal.SIGTERM)
+    try:
+        output, _ = proc.communicate(timeout=10)
+    except subprocess.TimeoutExpired:  # pragma: no cover - environment failure
+        proc.kill()
+        output, _ = proc.communicate(timeout=5)
+    if output:
+        print(f"\n=== sysrepo-mcp server output (final) ===\n{output.decode(errors='replace')}\n{'='*38}", end="")
 
 
 # ---------------------------------------------------------------------------

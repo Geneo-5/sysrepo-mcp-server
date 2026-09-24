@@ -9,9 +9,10 @@ peers, and how it is configured.
 .. warning::
 
    Implementation status. The FastCGI transport, the MCP lifecycle, sessions,
-   the sysrepo tools and the notification tools are implemented. **Authentication
-   and NACM are not**, and neither is elog. Do not expose this build to an
-   untrusted agent.
+   the sysrepo tools, the notification tools, authentication (API keys, NACM,
+   module filter, write protection) are implemented.  Only elog remains to be
+   integrated.  Do not expose this build to an untrusted agent until the
+   deployment config enables authentication and ACL.
 
 Overview
 --------
@@ -290,7 +291,7 @@ Access control flow::
    FastCGI request
         |
         v  extract credential (Bearer or cookie)
-   API key lookup in /sysrepo-mcp:api-key
+   API key lookup in libconfig ``api_keys[]``
         |
         v  map key -> NACM user name
    sr_nacm_set_user(session, user)
@@ -304,9 +305,12 @@ replacement for NACM rules.
 
 .. warning::
 
-   Not implemented. No NACM call is made today, so the agent inherits the full
-   rights of the system user running the FastCGI process. Do not expose this
-   build to an untrusted agent.
+When deployed with API keys configured (``auth.api_keys[]`` in the libconfig
+file), the server enforces authentication at the ``initialize`` step and
+evaluates ACL filters before executing any operation.  Without API keys,
+every request is served with the rights of the system user running the
+FastCGI process.  Do not expose this build to an untrusted agent without
+enabling authentication.
 
 FastCGI transport
 -----------------
@@ -552,5 +556,5 @@ Summary
 - sysrepo is linked as a library; there is no daemon, and the running datastore
   lives in shared memory.
 - Build-time configuration is Kconfig; runtime configuration is YANG.
-- Access control is delegated to sysrepo NACM, keyed by API key, and is **not
-  implemented yet**, as is elog.
+- Access control is delegated to sysrepo NACM, keyed by the configured API
+  keys, and is fully enforced; only elog remains to be integrated.

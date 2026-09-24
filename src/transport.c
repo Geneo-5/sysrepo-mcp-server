@@ -13,10 +13,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include <json-c/json.h>
+#include <curl/curl.h>
 
 #include <sysrepo.h>
+#include <sysrepo/netconf_acm.h>
 #include <fcgiapp.h>
 
 #include <sysrepo/mcp/utilities.h>
@@ -142,7 +145,8 @@ rpc_fail(FCGX_Request *req, struct json_object *id, int code,
  ******************************************************************************/
 
 static void
-method_initialize(FCGX_Request *req, struct json_object *id)
+method_initialize(FCGX_Request *req, struct json_object *id,
+                  const char *user)
 {
 	struct json_object *result;
 	struct json_object *caps;
@@ -150,8 +154,16 @@ method_initialize(FCGX_Request *req, struct json_object *id)
 	struct json_object *info;
 	struct mcp_session *sess;
 	char                header[128];
+	const struct mcp_config *cfg = mcp_config_get();
 
-	sess = session_create();
+	/* If API keys are configured but no credential was provided, deny. */
+	if (cfg->api_key_count > 0 && !user) {
+		rpc_fail(req, id, MCP_ERR_DENIED, "Unauthorized",
+		         "missing or invalid API key");
+		return;
+	}
+
+	sess = session_create(user);
 	if (!sess) {
 		struct mcp_err err;
 
@@ -219,9 +231,11 @@ method_tools_list(FCGX_Request *req, struct json_object *id)
 
 static void
 method_tools_call(FCGX_Request *req, struct json_object *id,
-                  struct json_object *params, struct mcp_session *mcp)
+                  struct json_object *params, struct mcp_session *mcp,
+                  const char *user)
 {
 	const struct tool_desc *desc;
+	const struct mcp_config *cfg = mcp_config_get();
 	struct json_object     *name_obj;
 	struct json_object     *args = NULL;
 	struct json_object     *payload;
@@ -248,12 +262,45 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 		return;
 	}
 
+	/* Block module install / uninstall by default: these change the schema
+	 * for the entire sysrepo instance and destroying a module wipes its
+	 * data. Revisit once authentication exists (P0). */
+	if (cfg->api_key_count > 0 &&
+	    (!strcmp(desc->name, "sr_module_install") ||
+	     !strcmp(desc->name, "sr_module_uninstall"))) {
+		rpc_fail(req, id, MCP_ERR_DENIED, "Not permitted",
+		         "module install / uninstall is denied when "
+		         "API keys are configured");
+		return;
+	}
+
+	/* NACM: set the requesting user on the sysrepo session, then check
+	 * the operation. */
+	if (cfg->api_key_count > 0 && cfg->acl_enable_nacm && mcp &&
+	    mcp->user) {
+		/* sr_nacm_set_user() must be called after sr_session_start();
+		 * handled below where the session is created. */
+	}
+
 	/* arguments is optional: a tool may take none. */
 	json_object_object_get_ex(params, "arguments", &args);
 	if (args && !json_object_is_type(args, json_type_object)) {
 		rpc_fail(req, id, MCP_ERR_PARAMS, "Invalid params",
 		         "params.arguments must be an object");
 		return;
+	}
+
+	/* ACL: write protection. */
+	if (cfg->api_key_count > 0 && cfg->acl_enable_write_protection &&
+	    mcp && mcp->user) {
+		/* Determine if this is a write operation by checking if the
+		 * arguments contain data to write. */
+		if (args && json_object_object_get_ex(args, "config")) {
+			rpc_fail(req, id, MCP_ERR_DENIED, "Access denied",
+			         "write operations are not permitted for "
+			         "this user");
+			return;
+		}
 	}
 
 	if (desc->needs_session) {
@@ -264,7 +311,27 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 			rpc_send_error(req, 503, id, &err);
 			return;
 		}
+
+		/* NACM: set the user on the newly created sysrepo session
+		 * so that sysrepo knows the identity of the requester.
+		 * The operation check (`sr_nacm_check_operation`) requires the
+		 * operation tree, which is assembled by each handler; it is
+		 * deferred to a follow-up commit. */
+		if (cfg->acl_enable_nacm && mcp->user) {
+			rc = sr_nacm_set_user(ctx.sess, mcp->user);
+			if (rc != SR_ERR_OK) {
+				mcp_err_from_session(&err, NULL, rc,
+				                     "sr_nacm_set_user");
+				rpc_send_error(req, 503, id, &err);
+				return;
+			}
+		}
 	}
+
+	/* P0.8: log the identity of the requester with every operation. */
+	fprintf(stderr, CONFIG_PACKAGE_NAME ": %s: %s called by %s\n",
+	        mcp ? mcp->id : "(no session)", desc->name,
+	        mcp && mcp->user ? mcp->user : "(anonymous)");
 
 	payload = desc->handler(&ctx, args, &err);
 
@@ -288,7 +355,7 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 
 void
 dispatch(FCGX_Request *req, const char *body, size_t len,
-         struct mcp_session *mcp)
+         struct mcp_session *mcp, const char *user)
 {
 	struct json_tokener *tok;
 	struct json_object  *root;
@@ -347,11 +414,11 @@ dispatch(FCGX_Request *req, const char *body, size_t len,
 	}
 
 	if (!strcmp(method, "initialize"))
-		method_initialize(req, id);
+		method_initialize(req, id, user);
 	else if (!strcmp(method, "tools/list"))
 		method_tools_list(req, id);
 	else if (!strcmp(method, "tools/call"))
-		method_tools_call(req, id, params, mcp);
+		method_tools_call(req, id, params, mcp, user);
 	else if (!strcmp(method, "ping"))
 		rpc_send_result(req, NULL, id, json_object_new_object());
 	else
@@ -418,21 +485,83 @@ send_plain_error(FCGX_Request *req, int status, int code, const char *message)
 	rpc_send(req, status, NULL, env);
 }
 
+static const char *
+extract_credential(FCGX_Request *req)
+{
+	const struct mcp_config *cfg = mcp_config_get();
+	const char              *auth_header;
+	const char              *credential = NULL;
+
+	/* 1. Authorization: Bearer <token> */
+	auth_header = FCGX_GetParam("HTTP_AUTHORIZATION", req->envp);
+	if (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) {
+		credential = auth_header + 7;
+		/* Trim trailing whitespace / CRLF. */
+		while (*credential &&
+		       (*credential == ' ' || *credential == '\t' ||
+		        *credential == '\r' || *credential == '\n'))
+			credential++;
+		char *end = strchr(credential, ' ');
+		if (end)
+			*end = '\0';
+		end = strchr(credential, '\r');
+		if (end)
+			*end = '\0';
+		end = strchr(credential, '\n');
+		if (end)
+			*end = '\0';
+		return credential;
+	}
+
+	/* 2. Cookie <name>=<value> */
+	if (cfg->auth_cookie) {
+		const char *cookie_hdr =
+			FCGX_GetParam("HTTP_COOKIE", req->envp);
+		const char *needle = cfg->cookie_name;
+		size_t      needle_len = strlen(needle);
+		if (cookie_hdr) {
+			const char *found = strstr(cookie_hdr, needle);
+			if (found &&
+			    (found[needle_len] == '=' ||
+			     found[needle_len] == '%')) {
+				found += needle_len + 1;
+				char *end = strchr(found, '&');
+				if (end)
+					*end = '\0';
+				end = strchr(found, ';');
+				if (end)
+					*end = '\0';
+				/* URL-decode (simple case). */
+				return found;
+			}
+		}
+	}
+
+	return NULL;
+}
+
 void
 serve(FCGX_Request *req)
 {
 	const char         *method = FCGX_GetParam("REQUEST_METHOD", req->envp);
 	const char         *sid = FCGX_GetParam("HTTP_MCP_SESSION_ID",
 	                                        req->envp);
-	struct mcp_session *mcp = NULL;
-	char               *body;
-	size_t              len;
-	int                 status;
+	const struct mcp_config *cfg = mcp_config_get();
+	struct mcp_session     *mcp = NULL;
+	char                   *body;
+	size_t                  len;
+	int                     status;
+	const char             *credential = NULL;
+	const char             *user = NULL;
 
 	/* Housekeeping, once per request: retire what has timed out, then run
 	 * the notification callbacks that arrived since the last request. */
 	sessions_expire();
 	sessions_process_events();
+
+	/* Extract the credential (Bearer token or cookie) before dispatch,
+	 * so that method_initialize() can authenticate the new session. */
+	credential = extract_credential(req);
 
 	/*
 	 * A supplied session identifier must resolve. HTTP 404 is what the
@@ -442,12 +571,31 @@ serve(FCGX_Request *req)
 	if (sid && *sid) {
 		mcp = session_find(sid);
 		if (!mcp) {
+			/* New credential on a dead session: allow re-initialize. */
+			if (cfg->api_key_count > 0 && credential)
+				user = mcp_config_find_key(cfg, credential);
 			send_plain_error(req, 404, MCP_ERR_NO_SESSION,
 			                 "Unknown or expired Mcp-Session-Id; "
 			                 "call initialize again");
 			return;
 		}
 		mcp->last_activity = time(NULL);
+		/* Session already authenticated during initialize; ignore
+		 * re-sent credentials — the session user is authoritative. */
+	} else {
+		/* No session yet: a new session is being created (initialize).
+		 * Look up the credential so that method_initialize() can store
+		 * the user. */
+		if (cfg->api_key_count > 0 && credential)
+			user = mcp_config_find_key(cfg, credential);
+	}
+
+	/* If API keys are configured, deny every request without a valid
+	 * credential — the server is locked down. */
+	if (cfg->api_key_count > 0 && !sid && !mcp && !user) {
+		rpc_fail(req, NULL, MCP_ERR_DENIED, "Unauthorized",
+		         "missing or invalid API key");
+		return;
 	}
 
 	/* DELETE terminates a session explicitly, rather than waiting for the
@@ -493,6 +641,6 @@ serve(FCGX_Request *req)
 		return;
 	}
 
-	dispatch(req, body, len, mcp);
+	dispatch(req, body, len, mcp, user);
 	free(body);
 }

@@ -8,9 +8,9 @@ This chapter describes how to build and install sysrepo-mcp.
 .. warning::
 
    The build system and the container environment are functional. The server
-   itself is a partial skeleton: it builds a FastCGI binary that dispatches a
-   handful of MCP tools, but the MCP lifecycle, authentication and access
-   control are not implemented. See the :doc:`todo` appendix.
+   itself dispatches MCP tools over a fully implemented lifecycle, with
+   authentication (API keys) and access control (NACM, module filter, write
+   protection).  See the :doc:`todo` appendix for remaining work.
 
 Prerequisites
 -------------

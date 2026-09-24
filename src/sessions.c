@@ -116,6 +116,8 @@ session_destroy(struct mcp_session *sess)
 
 	session_drain(sess);
 
+	free(sess->user);
+	sess->user = NULL;
 	sess->in_use = 0;
 	sess->id[0] = '\0';
 	sess->next_sub_id = 0;
@@ -200,7 +202,7 @@ session_generate_id(char *out)
  */
 
 struct mcp_session *
-session_create(void)
+session_create(const char *user)
 {
 	size_t i;
 
@@ -215,6 +217,18 @@ session_create(void)
 		sess->in_use = 1;
 		sess->created = time(NULL);
 		sess->last_activity = sess->created;
+		if (user) {
+			sess->user = strdup(user);
+			if (!sess->user) {
+				sess->in_use = 0;
+				g_session_count = 0; /* session_count hasn't been incremented yet, but g_session_count-- in destroy won't be called. */
+				fprintf(stderr, CONFIG_PACKAGE_NAME
+				        ": out of memory duplicating user name\n");
+				return NULL;
+			}
+		} else {
+			sess->user = NULL;
+		}
 		g_session_count++;
 
 		return sess;

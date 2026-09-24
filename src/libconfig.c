@@ -480,10 +480,23 @@ mcp_config_free(struct mcp_config *cfg)
 const char *
 mcp_config_find_key(const struct mcp_config *cfg, const char *key)
 {
-	size_t i;
+	size_t i, j;
 
 	for (i = 0; i < cfg->api_key_count; i++) {
-		if (!strcmp(cfg->api_keys[i].key, key))
+		const char *stored = cfg->api_keys[i].key;
+		const char *given = key;
+		size_t stored_len = strlen(stored);
+		size_t given_len = strlen(given);
+		int different = (int)(stored_len ^ given_len);
+
+		/* Compare every byte regardless of length difference */
+		for (j = 0; j < (stored_len > given_len ? stored_len : given_len);
+		     j++) {
+			if (j < stored_len && j < given_len)
+				different |= (unsigned char)stored[j]
+				           ^ (unsigned char)given[j];
+		}
+		if (different == 0)
 			return cfg->api_keys[i].user;
 	}
 	return NULL;

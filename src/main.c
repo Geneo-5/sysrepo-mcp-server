@@ -239,11 +239,11 @@ usage(FILE *out)
 		CONFIG_PACKAGE_NAME " " CONFIG_PACKAGE_VERSION
 		" - MCP server for the sysrepo datastore\n"
 		"\n"
-		"Usage: " CONFIG_PACKAGE_NAME " [ --config <file> ]\n"
+		"Usage: " CONFIG_PACKAGE_NAME " [ -f <file> ] [ --config <file> ]\n"
 		"             [ --help ] [ --version ]\n"
 		"\n"
-		"  --config    path to the libconfig file\n"
-		"              (default: /etc/sysrepo-mcp/" CONFIG_PACKAGE_NAME
+		"  -f, --config    path to the libconfig file\n"
+		"                  (default: /etc/sysrepo-mcp/" CONFIG_PACKAGE_NAME
 		".conf)\n"
 		"  --help      print this message and exit\n"
 		"  --version   print the version and exit\n"
@@ -306,6 +306,10 @@ main(int argc, char *argv[])
 		if (!strcmp(argv[arg], "--version")) {
 			printf(CONFIG_PACKAGE_NAME " " CONFIG_PACKAGE_VERSION "\n");
 			return EXIT_SUCCESS;
+		}
+		if (!strcmp(argv[arg], "-f") && arg + 1 < argc) {
+			config_path = argv[++arg];
+			continue;
 		}
 		if (!strcmp(argv[arg], "--config") && arg + 1 < argc) {
 			config_path = argv[++arg];
