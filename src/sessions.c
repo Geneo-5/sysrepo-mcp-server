@@ -43,7 +43,7 @@
 
 static struct mcp_config *g_cfg;
 struct mcp_session *g_sessions;
-unsigned                    g_session_count;
+unsigned g_session_count;
 
 /* ------------------------------------------------------------------ notif_clear
  *
@@ -117,7 +117,9 @@ session_destroy(struct mcp_session *sess)
 	session_drain(sess);
 
 	free(sess->user);
+	free(sess->queue);
 	sess->user = NULL;
+	sess->queue = NULL;
 	sess->in_use = 0;
 	sess->id[0] = '\0';
 	sess->next_sub_id = 0;
@@ -228,6 +230,15 @@ session_create(const char *user)
 			}
 		} else {
 			sess->user = NULL;
+		}
+		sess->queue = calloc(mcp_config_get()->notif_queue_size, sizeof(*sess->queue));
+		if (!sess->queue) {
+			free(sess->user);
+			sess->in_use = 0;
+			g_session_count = 0; /* session_count hasn't been incremented yet, but g_session_count-- in destroy won't be called. */
+			fprintf(stderr, CONFIG_PACKAGE_NAME
+					": out of memory duplicating user name\n");
+			return NULL;			
 		}
 		g_session_count++;
 

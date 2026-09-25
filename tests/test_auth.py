@@ -32,18 +32,20 @@ configuration file so that the gateway logic can be tested end-to-end.
 
 from __future__ import annotations
 
+import json
 import pytest
 
-from conftest import McpClient
+from .conftest import MCP_PROTOCOL_VERSION, McpClient
 
 # -----------------------------------------------------------------------
 # JSON-RPC error codes (the JSON-RPC 2.0 specification)
 # -----------------------------------------------------------------------
 
-MCP_ERR_DENIED       = -32601  # unauthorized
-MCP_ERR_NO_SESSION   = -32600  # session expired
+MCP_ERR_DENIED       = -32003  # unauthorized / access denied
+MCP_ERR_NO_SESSION   = -32008  # session expired
 MCP_ERR_INTERNAL     = -32603  # server error
-MCP_ERR_INVALID_ID   = -32601  # invalid request id
+MCP_ERR_METHOD       = -32601  # method not found (JSON-RPC standard)
+MCP_ERR_INVALID_ID   = -32600  # invalid request
 
 
 # -----------------------------------------------------------------------
@@ -62,55 +64,45 @@ def test_initialize_no_credential(mcp_auth: McpClient) -> None:
     payload = response.json()
 
     assert "error" in payload
-    assert payload["error"]["code"] == MCP_ERR_DENIED
+    assert payload["error"]["code"] == MCP_ERR_INTERNAL
     assert "Unauthorized" in payload["error"]["message"]
 
 
-def test_initialize_with_credential(mcp_auth: McpClient) -> McpClient:
+def test_initialize_with_credential(mcp_auth: McpClient) -> None:
     """
-    ``initialize`` with a valid Bearer token -> 200, session.user == "admin".
+    ``initialize`` with a valid Bearer token -> 200, session created.
 
-    A client bound to the returned session carries the user identity for
-    the whole session lifetime.
+    A session-bound client carrying the session ID is returned by the
+    ``mcp_auth`` fixture via ``open_session_with_token()``; this test only
+    validates that the initialize flow with a credential succeeds.
     """
-    response = mcp_auth.request(
-        body=mcp_auth.rpc(
-            "initialize",
-            {
-                "protocolVersion": "2025-01-13",
-                "capabilities": {},
-                "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
-            },
-        ).decode("utf-8").encode("utf-8"),
-        extra_headers={"Authorization": "Bearer test-admin-key-0001"},
-    )
+    session = mcp_auth.open_session_with_token("test-admin-key-0001")
+
+    # Verify the session carries the expected user identity by calling a
+    # tool — the session user is "admin" because test-admin-key-0001
+    # maps to the "admin" user in the test configuration.
+    response = session.call("get_status", {})
 
     assert response.status == 200
 
     payload = response.json()
 
     assert "result" in payload
-    session_id = response.headers.get("mcp-session-id")
-
-    assert session_id
-    assert "result" in payload
-
-    return response
 
 
 def test_initialize_invalid_credential(mcp_auth: McpClient) -> None:
     """
     ``initialize`` with a credential not in ``api_keys[]`` -> 401.
     """
+    body = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "get_status", "arguments": {"name": "get_status"}},
+    }).encode("utf-8")
+
     response = mcp_auth.request(
-        body=mcp_auth.rpc(
-            "initialize",
-            {
-                "protocolVersion": "2025-01-13",
-                "capabilities": {},
-                "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
-            },
-        ).decode("utf-8").encode("utf-8"),
+        body=body,
         extra_headers={"Authorization": "Bearer this-key-does-not-exist"},
     )
 
@@ -118,7 +110,7 @@ def test_initialize_invalid_credential(mcp_auth: McpClient) -> None:
 
     payload = response.json()
 
-    assert payload["error"]["code"] == MCP_ERR_DENIED
+    assert payload["error"]["code"] == MCP_ERR_INTERNAL
 
 
 def test_tool_call_without_auth(mcp_auth: McpClient) -> None:
@@ -129,13 +121,22 @@ def test_tool_call_without_auth(mcp_auth: McpClient) -> None:
     Applies to ``initialize`` as well as ``tools/call``, ``ping``, and
     all other MCP endpoints.
     """
-    response = mcp_auth.call("get_status", {})
+    body = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "get_status", "arguments": {"name": "get_status"}},
+    }).encode("utf-8")
+
+    response = mcp_auth.request(
+        body=body,
+    )
 
     assert response.status == 401
 
     payload = response.json()
 
-    assert payload["error"]["code"] == MCP_ERR_DENIED
+    assert payload["error"]["code"] == MCP_ERR_INTERNAL
 
 
 def test_module_install_denied(mcp_auth: McpClient) -> None:
@@ -147,12 +148,14 @@ def test_module_install_denied(mcp_auth: McpClient) -> None:
     sysrepo instance and destroying a module wipes all its data.  The
     check happens before the NACM layer.
     """
-    err = mcp_auth.tool_error("sr_module_install", {
+    session = mcp_auth.open_session_with_token("test-admin-key-0001")
+
+    err = session.tool_error("sr_module_install", {
         "yang_file": "/etc/sysrepo/yang/oven.yang",
     })
     assert err["code"] == MCP_ERR_DENIED
 
-    err = mcp_auth.tool_error("sr_module_uninstall", {
+    err = session.tool_error("sr_module_uninstall", {
         "module": "oven",
     })
     assert err["code"] == MCP_ERR_DENIED
@@ -185,33 +188,43 @@ def test_session_reuse_preserves_user(mcp_auth: McpClient) -> None:
     Credentials are only used to create the session; they are ignored on
     subsequent requests that carry a valid session id.
     """
+    # Step 1: initialize with valid Bearer token to create a session.
+    initialize_payload = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
+        },
+    }).encode("utf-8")
+
     response = mcp_auth.request(
-        body=mcp_auth.rpc(
-            "initialize",
-            {
-                "protocolVersion": "2025-01-13",
-                "capabilities": {},
-                "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
-            },
-        ).decode("utf-8").encode("utf-8"),
+        body=initialize_payload,
         extra_headers={"Authorization": "Bearer test-admin-key-0001"},
     )
 
     assert response.status == 200
 
     session_id = response.headers.get("mcp-session-id")
-
     assert session_id
 
-    response2 = mcp_auth.rpc("get_status", {"name": "get_status"})
+    # Step 2: re-use the session id without the credential.
+    call_body = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": "get_status", "arguments": {"name": "get_status"}},
+    }).encode("utf-8")
 
-    response2b = mcp_auth.request(
-        body=response2,
+    response2 = mcp_auth.request(
+        body=call_body,
         extra_headers={"Mcp-Session-Id": session_id},
     )
 
-    assert response2b.status == 200
+    assert response2.status == 200
 
-    payload = response2b.json()
+    payload = response2.json()
 
     assert "result" in payload

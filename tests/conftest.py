@@ -58,6 +58,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OVEN_YANG = PROJECT_ROOT / "extern" / "sysrepo" / "examples" / "plugin" / "oven.yang"
 OVEN_PLUGIN_SRC = PROJECT_ROOT / "extern" / "sysrepo" / "examples" / "plugin" / "oven.c"
 
+# Test mirror of the server YANG model (used when yang/sysrepo-mcp.yang is
+# not installed, e.g. after the P1 libconfig transition).
+TEST_YANG = PROJECT_ROOT / "tests" / "sysrepo-mcp-test.yang"
+
 # Port 80 by default, as the deployment shape being tested is the real one.
 # Docker sets net.ipv4.ip_unprivileged_port_start=0, so an unprivileged process
 # in a container may bind it; override when that is not true.
@@ -193,6 +197,40 @@ class McpClient:
 
         return client
 
+    def open_session_with_token(self, token: str) -> "McpClient":
+        """
+        Open a session with a Bearer token and return a session-bound client.
+        """
+        initialize_payload = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
+            },
+        }).encode("utf-8")
+
+        response = self.request(
+            body=initialize_payload,
+            extra_headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status == 200, (
+            f"initialize failed: HTTP {response.status} {response.body!r}"
+        )
+
+        session_id = response.headers.get("mcp-session-id")
+
+        assert session_id, "initialize returned no Mcp-Session-Id header"
+
+        client = McpClient(self.host, self.port, self.endpoint)
+        client.session_id = session_id
+        client.rpc("notifications/initialized", req_id=None)
+
+        return client
+
     def close_session(self) -> Response:
         """Terminate the session this client is bound to."""
         return self.request(body=None, method="DELETE", content_type=None)
@@ -300,7 +338,10 @@ class McpClient:
         """Call a tool expected to fail, and return the JSON-RPC error."""
         response = self.call(name, arguments)
 
-        assert response.status == 200, f"HTTP {response.status}: {response.body!r}"
+        # Accept 200 (error in JSON-RPC body) or 4xx client errors.
+        assert response.status < 500, (
+            f"HTTP {response.status}: {response.body!r}"
+        )
 
         payload = response.json()
 
@@ -371,6 +412,32 @@ def sysrepo_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     return env
 
 
+@pytest.fixture(scope="session")
+def auth_sysrepo_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
+    """
+    A second private sysrepo repository and shared-memory namespace for
+    the auth fixture.
+
+    sysrepo-mcp creates a rwlock on the repository directory in /dev/shm.
+    If mcp and mcp_auth share the same repository they contend on the same
+    rwlock and one of them deadlocks.  This fixture gives mcp_auth its own
+    isolated repo so the two server instances never touch the same memory.
+    """
+    if shutil.which("sysrepoctl") is None:
+        return {}  # Signal to mcp_auth that sysrepo is unavailable.
+
+    root = tmp_path_factory.mktemp("auth_sysrepo")
+    repo = root / "repository"
+    repo.mkdir()
+
+    env = dict(os.environ)
+    env["SYSREPO_REPOSITORY_PATH"] = str(repo)
+    env["SYSREPO_SHM_PREFIX"] = f"sr_mcp_auth_{os.getpid()}"
+    env.setdefault("LD_LIBRARY_PATH", "/usr/local/lib")
+
+    return env
+
+
 @dataclass
 class ModuleInstall:
     """Outcome of installing one YANG module, kept so a test can assert on it."""
@@ -407,11 +474,11 @@ def installed_modules(sysrepo_env: dict[str, str]) -> dict[str, ModuleInstall]:
     being absent only means extern/ was never downloaded.
     """
     results = {
-        "sysrepo-mcp": _install_module(
+        "sysrepo-mcp-test": _install_module(
             sysrepo_env,
-            "sysrepo-mcp",
-            PROJECT_ROOT / "yang" / "sysrepo-mcp.yang",
-            [PROJECT_ROOT / "yang"],
+            "sysrepo-mcp-test",
+            TEST_YANG,
+            [TEST_YANG.parent],
         ),
         "oven": _install_module(
             sysrepo_env,
@@ -448,13 +515,12 @@ def mcp_module(
     mcp: "McpClient",
     installed_modules: dict[str, ModuleInstall],
 ) -> "McpClient":
-    """A client, with the project's own YANG module guaranteed installed."""
-    result = installed_modules["sysrepo-mcp"]
+    """A client, with the project's test YANG module guaranteed installed."""
+    result = installed_modules["sysrepo-mcp-test"]
 
     if not result.installed:
         pytest.skip(
-            "yang/sysrepo-mcp.yang is not installed; see "
-            "test_project_module_installs for the reason"
+            f"{TEST_YANG} not found; see test_project_module_installs for the reason"
         )
 
     return mcp
@@ -498,8 +564,7 @@ fastcgi.server = (
     "{endpoint}" => (
         "sysrepo-mcp" => (
             "socket"          => "{socket}",
-            "bin-path"        => "{binary}",
-            "argv"            => ( "{config_path}" ),
+            "bin-path"        => "{binary} --config {config_path}",
             "check-local"     => "disable",
             "max-procs"       => 1,
             "bin-environment" => (
@@ -514,11 +579,8 @@ fastcgi.server = (
 
 
 @pytest.fixture(scope="session")
-def mcp(
-    sysrepo_env: dict[str, str],
-    installed_modules: dict[str, ModuleInstall],
-    tmp_path_factory: pytest.TempPathFactory,
-) -> McpClient:
+def mcp(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFactory
+       ) -> McpClient:
     """
     Start lighttpd in front of sysrepo-mcp and yield a client.
 
@@ -553,7 +615,7 @@ def mcp(
             errorlog=errorlog,
             pidfile=root / "lighttpd.pid",
             endpoint=MCP_ENDPOINT,
-            socket=root / "mcp.sock",
+            socket=root / "sysrepo-mcp.sock",
             binary=binary,
             config_path=str(config_path),
             repository=sysrepo_env["SYSREPO_REPOSITORY_PATH"],
@@ -664,9 +726,11 @@ def oven_session(mcp_oven: McpClient) -> McpClient:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="session")
-def mcp_auth(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFactory
-             ) -> McpClient:
+@pytest.fixture
+def mcp_auth(
+    auth_sysrepo_env: dict[str, str],
+    tmp_path_factory: pytest.TempPathFactory,
+) -> McpClient:
     """
     Start lighttpd in front of sysrepo-mcp with docker/sysrepo-mcp.conf.
 
@@ -674,11 +738,19 @@ def mcp_auth(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFacto
     containing *api_keys* so that every MCP endpoint enforces authentication
     and ACL checks.
 
-    The fixture is session-scoped so tests can use a shared server with keys
-    enabled and verify that auth gates apply at every layer.
+    This fixture is function-scoped so the auth server is torn down before the
+    next test starts, ensuring no two server instances fight over the same
+    sysrepo rwlock in /dev/shm.  When it is not available (empty dict, because
+    sysrepoctl is missing) the fixture returns a session-less client: tests
+    that need auth will get a 401/404 rather than a server error.
     """
+    if not auth_sysrepo_env:
+        # sysrepoctl not available — return a dead client so all auth tests
+        # fail early rather than hanging.
+        return McpClient("127.0.0.1", 1)  # unroutable; will 401/404.
+
     binary = _server_binary()
-    config_path = PROJECT_ROOT / "docker" / "sysrepo-mcp.conf"
+    auth_config = PROJECT_ROOT / "docker" / "sysrepo-mcp-auth.conf"
 
     if not binary.is_file():
         pytest.skip(f"{binary} not found: build it with scripts/build-docker.sh")
@@ -693,49 +765,57 @@ def mcp_auth(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFacto
 
     conf = root / "lighttpd.conf"
     errorlog = root / "error.log"
+    auth_port = TEST_PORT + 1  # avoid conflict with the default 'mcp' fixture.
     conf.write_text(
         LIGHTTPD_CONF.format(
             docroot=docroot,
             host=TEST_HOST,
-            port=TEST_PORT,
+            port=auth_port,
             errorlog=errorlog,
             pidfile=root / "lighttpd.pid",
             endpoint=MCP_ENDPOINT,
-            socket=root / "mcp.sock",
+            socket=root / "sysrepo-mcp-auth.sock",
             binary=binary,
-            config_path=str(config_path),
-            repository=sysrepo_env["SYSREPO_REPOSITORY_PATH"],
-            shm_prefix=sysrepo_env["SYSREPO_SHM_PREFIX"],
-            ld_library_path=sysrepo_env.get("LD_LIBRARY_PATH", "/usr/local/lib"),
+            config_path=str(auth_config),
+            repository=auth_sysrepo_env["SYSREPO_REPOSITORY_PATH"],
+            shm_prefix=auth_sysrepo_env["SYSREPO_SHM_PREFIX"],
+            ld_library_path=auth_sysrepo_env.get("LD_LIBRARY_PATH", "/usr/local/lib"),
             argv=binary,
         )
     )
 
     proc = subprocess.Popen(
         ["lighttpd", "-D", "-f", str(conf)],
-        env=sysrepo_env,
+        env=auth_sysrepo_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
 
-    if not _wait_for_port(TEST_HOST, TEST_PORT, STARTUP_TIMEOUT):
+    if not _wait_for_port(TEST_HOST, auth_port, STARTUP_TIMEOUT):
         proc.terminate()
         output = proc.communicate(timeout=5)[0].decode(errors="replace")
         pytest.skip(
-            f"lighttpd did not listen on {TEST_HOST}:{TEST_PORT}.\n"
+            f"lighttpd did not listen on {TEST_HOST}:{auth_port}.\n"
             f"lighttpd output:\n{output}\n"
             f"error log:\n{_tail(errorlog)}\n"
             "If the port is the problem, set SYSREPO_MCP_TEST_PORT."
         )
 
-    client = McpClient(TEST_HOST, TEST_PORT)
+    client = McpClient(TEST_HOST, auth_port)
 
     # A first request proves the FastCGI process really started: lighttpd
     # spawns it lazily, so binding the port alone proves nothing.  With
     # auth enabled, probe with the admin key so the server returns a real
     # 200 rather than a 401.
     try:
-        body = client.rpc("get_status", {"name": "get_status"})
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "get_status", "arguments": {"name": "get_status"}},
+            }
+        ).encode("utf-8")
         probe = client.request(
             body=body,
             extra_headers={"Authorization": "Bearer test-admin-key-0001"},

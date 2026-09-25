@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <getopt.h>
 
 #include <json-c/json.h>
 
@@ -295,30 +296,30 @@ main(int argc, char *argv[])
 	FCGX_Request     req;
 	struct sigaction sa;
 	const char       *config_path = "/etc/sysrepo-mcp/sysrepo-mcp.conf";
-	size_t           i;
-	int              arg;
+	int              opt;
+	static struct option long_options[] = {
+		{"config", required_argument, NULL, 'f'},
+		{"help",   no_argument,       NULL, 'h'},
+		{"version",no_argument,       NULL, 'V'},
+		{NULL,     0,                 NULL,  0  }
+	};
 
-	for (arg = 1; arg < argc; arg++) {
-		if (!strcmp(argv[arg], "--help") || !strcmp(argv[arg], "-h")) {
+	while ((opt = getopt_long(argc, argv, "f:hV", long_options, NULL)) != -1) {
+		fprintf(stderr, "%c %s\n", opt, optarg);
+		switch (opt) {
+		case 'f':
+			config_path = optarg;
+			break;
+		case 'h':
 			usage(stdout);
 			return EXIT_SUCCESS;
-		}
-		if (!strcmp(argv[arg], "--version")) {
+		case 'V':
 			printf(CONFIG_PACKAGE_NAME " " CONFIG_PACKAGE_VERSION "\n");
 			return EXIT_SUCCESS;
+		default:
+			usage(stderr);
+			return EXIT_FAILURE;
 		}
-		if (!strcmp(argv[arg], "-f") && arg + 1 < argc) {
-			config_path = argv[++arg];
-			continue;
-		}
-		if (!strcmp(argv[arg], "--config") && arg + 1 < argc) {
-			config_path = argv[++arg];
-			continue;
-		}
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": unknown option \"%s\"\n",
-		        argv[arg]);
-		usage(stderr);
-		return EXIT_FAILURE;
 	}
 
 	if (FCGX_Init()) {

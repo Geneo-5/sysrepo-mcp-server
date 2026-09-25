@@ -22,7 +22,7 @@
  * can store the address (and later, a shared-memory pointer) without
  * exposing the full definition. */
 
-static struct mcp_config g_config;
+static struct mcp_config g_config = {0, };
 
 /* ---------------------------------------------------------------- mcp_config_set
  */
@@ -30,7 +30,26 @@ static struct mcp_config g_config;
 void
 mcp_config_set(const struct mcp_config *cfg)
 {
+	size_t i;
+
+	if (g_config.api_keys) {
+		mcp_config_free(&g_config);
+	}
+
 	memcpy(&g_config, cfg, sizeof(g_config));
+
+	/* Deep copy api_keys so that mcp_config_free(&cfg) in main() does not
+	 * free the copy stored in g_config (use-after-free / double-free). */
+	if (cfg->api_keys) {
+		g_config.api_keys = calloc(cfg->api_key_count, sizeof(*g_config.api_keys));
+		if (g_config.api_keys) {
+			for (i = 0; i < cfg->api_key_count; i++) {
+				g_config.api_keys[i].key   = strdup(cfg->api_keys[i].key);
+				g_config.api_keys[i].user  = strdup(cfg->api_keys[i].user);
+			}
+			g_config.api_key_count = cfg->api_key_count;
+		}
+	}
 }
 
 /* ---------------------------------------------------------------- mcp_config_get

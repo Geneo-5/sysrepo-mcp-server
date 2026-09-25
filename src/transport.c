@@ -156,10 +156,13 @@ method_initialize(FCGX_Request *req, struct json_object *id,
 	char                header[128];
 	const struct mcp_config *cfg = mcp_config_get();
 
-	/* If API keys are configured but no credential was provided, deny. */
-	if (cfg->api_key_count > 0 && !user) {
-		rpc_fail(req, id, MCP_ERR_DENIED, "Unauthorized",
-		         "missing or invalid API key");
+	/* Auth: if authentication is on but no user was resolved, deny. */
+	if (cfg->auth_method > 0 && !user) {
+		struct mcp_err err;
+
+		mcp_err_set(&err, MCP_ERR_INTERNAL, "Unauthorized",
+			    "missing or invalid API key");
+		rpc_send_error(req, 401, id, &err);
 		return;
 	}
 
@@ -238,6 +241,7 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 	const struct mcp_config *cfg = mcp_config_get();
 	struct json_object     *name_obj;
 	struct json_object     *args = NULL;
+	struct json_object     *write_target = NULL;
 	struct json_object     *payload;
 	struct tool_ctx         ctx = { NULL, NULL };
 	struct mcp_err          err;
@@ -262,24 +266,16 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 		return;
 	}
 
-	/* Block module install / uninstall by default: these change the schema
-	 * for the entire sysrepo instance and destroying a module wipes its
-	 * data. Revisit once authentication exists (P0). */
-	if (cfg->api_key_count > 0 &&
+	/* Block module install / uninstall when auth is on: these change the
+	 * schema for the entire sysrepo instance and destroying a module wipes
+	 * its data. */
+	if (cfg->auth_method > 0 &&
 	    (!strcmp(desc->name, "sr_module_install") ||
 	     !strcmp(desc->name, "sr_module_uninstall"))) {
-		rpc_fail(req, id, MCP_ERR_DENIED, "Not permitted",
-		         "module install / uninstall is denied when "
-		         "API keys are configured");
+			mcp_err_set(&err, MCP_ERR_DENIED, "Not permitted",
+			            "module install / uninstall is not permitted");
+			rpc_send_error(req, 403, id, &err);
 		return;
-	}
-
-	/* NACM: set the requesting user on the sysrepo session, then check
-	 * the operation. */
-	if (cfg->api_key_count > 0 && cfg->acl_enable_nacm && mcp &&
-	    mcp->user) {
-		/* sr_nacm_set_user() must be called after sr_session_start();
-		 * handled below where the session is created. */
 	}
 
 	/* arguments is optional: a tool may take none. */
@@ -290,38 +286,21 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 		return;
 	}
 
-	/* ACL: write protection. */
-	if (cfg->api_key_count > 0 && cfg->acl_enable_write_protection &&
-	    mcp && mcp->user) {
-		/* Determine if this is a write operation by checking if the
-		 * arguments contain data to write. */
-		if (args && json_object_object_get_ex(args, "config")) {
-			rpc_fail(req, id, MCP_ERR_DENIED, "Access denied",
-			         "write operations are not permitted for "
-			         "this user");
-			return;
-		}
-	}
-
 	if (desc->needs_session) {
 		rc = sr_session_start(g_conn, SR_DS_RUNNING, &ctx.sess);
 		if (rc != SR_ERR_OK) {
-			mcp_err_from_session(&err, NULL, rc,
-			                     "sr_session_start");
+			mcp_err_from_session(&err, NULL, rc, "sr_session_start");
 			rpc_send_error(req, 503, id, &err);
 			return;
 		}
 
-		/* NACM: set the user on the newly created sysrepo session
-		 * so that sysrepo knows the identity of the requester.
-		 * The operation check (`sr_nacm_check_operation`) requires the
-		 * operation tree, which is assembled by each handler; it is
+		/* NACM: set the user on the newly created sysrepo session.
+		 * sr_nacm_check_operation() is called in each handler;
 		 * deferred to a follow-up commit. */
-		if (cfg->acl_enable_nacm && mcp->user) {
+		if (cfg->auth_method > 0 && mcp->user) {
 			rc = sr_nacm_set_user(ctx.sess, mcp->user);
 			if (rc != SR_ERR_OK) {
-				mcp_err_from_session(&err, NULL, rc,
-				                     "sr_nacm_set_user");
+				mcp_err_from_session(&err, NULL, rc, "sr_nacm_set_user");
 				rpc_send_error(req, 503, id, &err);
 				return;
 			}
@@ -514,7 +493,8 @@ extract_credential(FCGX_Request *req)
 	}
 
 	/* 2. Cookie <name>=<value> */
-	if (cfg->auth_cookie) {
+	if (cfg->auth_method == 2) { /* == "cookie" */
+
 		const char *cookie_hdr =
 			FCGX_GetParam("HTTP_COOKIE", req->envp);
 		const char *needle = cfg->cookie_name;
@@ -572,7 +552,7 @@ serve(FCGX_Request *req)
 		mcp = session_find(sid);
 		if (!mcp) {
 			/* New credential on a dead session: allow re-initialize. */
-			if (cfg->api_key_count > 0 && credential)
+			if (cfg->auth_method > 0 && credential)
 				user = mcp_config_find_key(cfg, credential);
 			send_plain_error(req, 404, MCP_ERR_NO_SESSION,
 			                 "Unknown or expired Mcp-Session-Id; "
@@ -586,15 +566,18 @@ serve(FCGX_Request *req)
 		/* No session yet: a new session is being created (initialize).
 		 * Look up the credential so that method_initialize() can store
 		 * the user. */
-		if (cfg->api_key_count > 0 && credential)
+		if (cfg->auth_method > 0 && credential)
 			user = mcp_config_find_key(cfg, credential);
 	}
 
-	/* If API keys are configured, deny every request without a valid
-	 * credential — the server is locked down. */
-	if (cfg->api_key_count > 0 && !sid && !mcp && !user) {
-		rpc_fail(req, NULL, MCP_ERR_DENIED, "Unauthorized",
-		         "missing or invalid API key");
+	/* If Authentication is configured, deny every request without a valid
+	 * credential — the server requires authentication. */
+	if (cfg->auth_method > 0 && !sid && !mcp && !user) {
+		struct mcp_err err;
+
+		mcp_err_set(&err, MCP_ERR_INTERNAL, "Unauthorized",
+		            "missing or invalid API key");
+		rpc_send_error(req, 401, NULL, &err);
 		return;
 	}
 

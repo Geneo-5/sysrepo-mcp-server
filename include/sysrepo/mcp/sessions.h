@@ -66,11 +66,11 @@ struct mcp_session {
 	/* Ring buffer of notifications waiting to be polled.
 	 * Size is a compile-time upper bound; the runtime limit is
 	 * used by the queue push/pull code. */
-	struct mcp_notif queue[CONFIG_SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE];
-	size_t           head;
-	size_t           count;
-	uint64_t         total_received;
-	uint64_t         total_dropped;
+	struct mcp_notif *queue;
+	size_t            head;
+	size_t            count;
+	uint64_t          total_received;
+	uint64_t          total_dropped;
 };
 
 /* ------------------------------------------------------------------- globals

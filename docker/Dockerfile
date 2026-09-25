@@ -208,6 +208,10 @@ RUN --mount=type=bind,source=extern/elog,target=/src/elog,readonly \
 RUN ldconfig
 RUN rm -rf /build
 
+# Add admin and viewer. operator already existe
+RUN useradd admin && \
+    useradd viewer
+
 # ----------------------------------------------------------------------------
 # 3. lighttpd (background HTTP server)
 # ----------------------------------------------------------------------------

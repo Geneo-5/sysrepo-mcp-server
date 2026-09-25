@@ -70,22 +70,16 @@ struct mcp_config {
 	char tcp_host[256];		/* SYSREPO_MCP_SERVER_TCP_HOST */
 	int  tcp_port;			/* SYSREPO_MCP_SERVER_TCP_PORT */
 
-	/* server.auth -- "method" in the file is "bearer" or "cookie". */
-	int  auth_bearer;		/* SYSREPO_MCP_SERVER_AUTH_BEARER */
-	int  auth_cookie;		/* SYSREPO_MCP_SERVER_AUTH_COOKIE */
+	/* server.auth: "none", "bearer" or "cookie".  When "none" (the
+	 * default) no authentication is performed.  NACM is implicit
+	 * whenever authentication is on (the old server.acl section is
+	 * gone). */
+	int  auth_method;		/* SYSREPO_MCP_SERVER_AUTH_METHOD */
 	char cookie_name[128];		/* SYSREPO_MCP_SERVER_COOKIE_NAME */
 
 	struct mcp_api_key *api_keys;	/* owned; see mcp_config_free() */
 	size_t               api_key_count;
 
-	/* server.acl */
-	int   acl_enabled;			/* SYSREPO_MCP_SERVER_ACL_ENABLED */
-	int   acl_enable_nacm;			/* SYSREPO_MCP_SERVER_ACL_ENABLE_NACM */
-	int   acl_enable_module_filter;	/* SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER */
-	int   acl_enable_operation_filter;	/* SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER */
-	int   acl_enable_write_protection;	/* SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION */
-	char *acl_allowed_modules;		/* SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES:
-						 * owned, comma-separated, NULL/empty = all */
 
 	/* server.log */
 	int  syslog_enabled;		/* SYSREPO_MCP_SERVER_SYSLOG_ENABLED */

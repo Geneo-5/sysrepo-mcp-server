@@ -109,11 +109,11 @@ check_range_uint(const char *name, long long value, long long min, long long max
 static int
 load_schema(config_t *cc, struct mcp_config *cfg)
 {
-	long long v;
+	int v;
 
-	if (config_lookup_int(cc, "server.session.max_tree_depth", (int *)&v)) {
+	if (config_lookup_int(cc, "server.session.max_tree_depth", &v)) {
 		if (check_range_uint("server.session.max_tree_depth", v,
-		                     MCP_RANGE_MAX_SESSIONS_MIN,
+		                     MCP_RANGE_MAX_TREE_DEPTH_MIN,
 		                     MCP_RANGE_MAX_TREE_DEPTH_MAX))
 			return -1;
 		cfg->max_tree_depth = (unsigned)v;
@@ -142,20 +142,15 @@ mcp_config_set_defaults(struct mcp_config *cfg)
 	copy_string(cfg->tcp_host, sizeof(cfg->tcp_host), "127.0.0.1");
 	cfg->tcp_port = 8080;
 
-	cfg->auth_bearer = 1;
-	cfg->auth_cookie = 0;
+	/* auth_method: 0 = "none" (no authentication), 1 = "bearer",
+	 * 2 = "cookie".  Default is "none" so that a file that sets
+	 * nothing behaves like the old unauthenticated server. */
+	cfg->auth_method  = 0;	/* NONE */
 	copy_string(cfg->cookie_name, sizeof(cfg->cookie_name), "mcp_session");
 	cfg->api_keys      = NULL;
 	cfg->api_key_count = 0;
 
-	cfg->acl_enabled                  = 1;
-	cfg->acl_enable_nacm              = 1;
-	cfg->acl_enable_module_filter     = 1;
-	cfg->acl_enable_operation_filter  = 0;
-	cfg->acl_enable_write_protection  = 0;
-	cfg->acl_allowed_modules          = NULL; /* empty = all modules */
-
-	cfg->syslog_enabled = 1;
+	cfg->syslog_enabled  = 1;
 	cfg->log_level       = 6;
 	cfg->log_verbose     = 0;
 	cfg->log_console     = 1;
@@ -169,30 +164,30 @@ mcp_config_set_defaults(struct mcp_config *cfg)
 static int
 load_session(config_t *cc, struct mcp_config *cfg)
 {
-	long long v;
+	int v;
 
-	if (config_lookup_int(cc, "server.session.max_sessions", (int *)&v)) {
+	if (config_lookup_int(cc, "server.session.max_sessions", &v)) {
 		if (check_range_uint("server.session.max_sessions", v,
 		                     MCP_RANGE_MAX_SESSIONS_MIN,
 		                     MCP_RANGE_MAX_SESSIONS_MAX))
 			return -1;
 		cfg->max_sessions = (unsigned)v;
 	}
-	if (config_lookup_int(cc, "server.session.ttl", (int *)&v)) {
+	if (config_lookup_int(cc, "server.session.ttl", &v)) {
 		if (check_range_uint("server.session.ttl", v,
 		                     MCP_RANGE_SESSION_TTL_MIN,
 		                     MCP_RANGE_SESSION_TTL_MAX))
 			return -1;
 		cfg->session_ttl = (unsigned)v;
 	}
-	if (config_lookup_int(cc, "server.session.notif_queue_size", (int *)&v)) {
+	if (config_lookup_int(cc, "server.session.notif_queue_size", &v)) {
 		if (check_range_uint("server.session.notif_queue_size", v,
 		                     MCP_RANGE_NOTIF_QUEUE_SIZE_MIN,
 		                     MCP_RANGE_NOTIF_QUEUE_SIZE_MAX))
 			return -1;
 		cfg->notif_queue_size = (unsigned)v;
 	}
-	if (config_lookup_int(cc, "server.session.default_timeout_ms", (int *)&v)) {
+	if (config_lookup_int(cc, "server.session.default_timeout_ms", &v)) {
 		if (check_range_uint("server.session.default_timeout_ms", v, 100,
 		                     60000))
 			return -1;
@@ -209,7 +204,7 @@ load_transport(config_t *cc, struct mcp_config *cfg)
 {
 	const char *mode;
 	const char *str;
-	int         port;
+	int         v;
 
 	if (config_lookup_string(cc, "server.transport.mode", &mode)) {
 		if (!strcmp(mode, "unix")) {
@@ -230,12 +225,12 @@ load_transport(config_t *cc, struct mcp_config *cfg)
 		            sizeof(cfg->unix_socket_path), str);
 	if (config_lookup_string(cc, "server.transport.tcp_host", &str))
 		copy_string(cfg->tcp_host, sizeof(cfg->tcp_host), str);
-	if (config_lookup_int(cc, "server.transport.tcp_port", &port)) {
-		if (check_range_uint("server.transport.tcp_port", port,
+	if (config_lookup_int(cc, "server.transport.tcp_port", &v)) {
+		if (check_range_uint("server.transport.tcp_port", v,
 		                     MCP_RANGE_TCP_PORT_MIN,
 		                     MCP_RANGE_TCP_PORT_MAX))
 			return -1;
-		cfg->tcp_port = port;
+		cfg->tcp_port = (int)v;
 	}
 	return 0;
 }
@@ -255,16 +250,16 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 	int                 count;
 
 	if (config_lookup_string(cc, "server.auth.method", &method)) {
-		if (!strcmp(method, "bearer")) {
-			cfg->auth_bearer = 1;
-			cfg->auth_cookie = 0;
+		if (!strcmp(method, "none")) {
+			cfg->auth_method = 0;
+		} else if (!strcmp(method, "bearer")) {
+			cfg->auth_method = 1;
 		} else if (!strcmp(method, "cookie")) {
-			cfg->auth_bearer = 0;
-			cfg->auth_cookie = 1;
+			cfg->auth_method = 2;
 		} else {
 			fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: "
-			        "server.auth.method must be \"bearer\" or "
-			        "\"cookie\", got \"%s\"\n", method);
+			        "server.auth.method must be \"none\", \"bearer\" "
+			        "or \"cookie\", got \"%s\"\n", method);
 			return -1;
 		}
 	}
@@ -320,63 +315,6 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 	return 0;
 }
 
-/* ---------------------------------------------------------------------- load_acl
- */
-
-static int
-load_acl(config_t *cc, struct mcp_config *cfg)
-{
-	config_setting_t *modules;
-	int                b;
-	int                i;
-	int                count;
-	size_t             total_len;
-	char              *joined;
-
-	if (config_lookup_bool(cc, "server.acl.enabled", &b))
-		cfg->acl_enabled = b;
-	if (config_lookup_bool(cc, "server.acl.enable_nacm", &b))
-		cfg->acl_enable_nacm = b;
-	if (config_lookup_bool(cc, "server.acl.enable_module_filter", &b))
-		cfg->acl_enable_module_filter = b;
-	if (config_lookup_bool(cc, "server.acl.enable_operation_filter", &b))
-		cfg->acl_enable_operation_filter = b;
-	if (config_lookup_bool(cc, "server.acl.enable_write_protection", &b))
-		cfg->acl_enable_write_protection = b;
-
-	modules = config_lookup(cc, "server.acl.allowed_modules");
-	if (modules == NULL)
-		return 0; /* absent: keep the "all modules" default */
-
-	count = config_setting_length(modules);
-	if (count == 0)
-		return 0;
-
-	/* Join the array back into the single comma-separated string that
-	 * SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES always was, so callers that
-	 * still expect that format (module allow-list check) don't change. */
-	total_len = 0;
-	for (i = 0; i < count; i++)
-		total_len += strlen(config_setting_get_string_elem(modules, i)) + 1;
-
-	joined = malloc(total_len);
-	if (joined == NULL) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: out of memory "
-		        "joining server.acl.allowed_modules\n");
-		return -1;
-	}
-	joined[0] = '\0';
-	for (i = 0; i < count; i++) {
-		if (i > 0)
-			strcat(joined, ",");
-		strcat(joined, config_setting_get_string_elem(modules, i));
-	}
-
-	free(cfg->acl_allowed_modules);
-	cfg->acl_allowed_modules = joined;
-	return 0;
-}
-
 /* ---------------------------------------------------------------------- load_log
  */
 
@@ -384,17 +322,17 @@ static int
 load_log(config_t *cc, struct mcp_config *cfg)
 {
 	const char *str;
+	int         v;
 	int         b;
-	int         level;
 
 	if (config_lookup_bool(cc, "server.log.syslog_enabled", &b))
 		cfg->syslog_enabled = b;
-	if (config_lookup_int(cc, "server.log.level", &level)) {
-		if (check_range_uint("server.log.level", level,
+	if (config_lookup_int(cc, "server.log.level", &v)) {
+		if (check_range_uint("server.log.level", v,
 		                     MCP_RANGE_LOG_LEVEL_MIN,
 		                     MCP_RANGE_LOG_LEVEL_MAX))
 			return -1;
-		cfg->log_level = level;
+		cfg->log_level = v;
 	}
 	if (config_lookup_bool(cc, "server.log.verbose", &b))
 		cfg->log_verbose = b;
@@ -431,8 +369,6 @@ mcp_config_load(const char *path, struct mcp_config *cfg)
 	if (rc == 0)
 		rc = load_auth(&cc, cfg);
 	if (rc == 0)
-		rc = load_acl(&cc, cfg);
-	if (rc == 0)
 		rc = load_log(&cc, cfg);
 
 	config_destroy(&cc);
@@ -440,12 +376,6 @@ mcp_config_load(const char *path, struct mcp_config *cfg)
 	if (rc == 0 && cfg->transport_unix && cfg->transport_tcp) {
 		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s: "
 		        "server.transport.mode cannot be both unix and tcp\n",
-		        path);
-		return -1;
-	}
-	if (rc == 0 && cfg->auth_bearer && cfg->auth_cookie) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s: "
-		        "server.auth.method cannot be both bearer and cookie\n",
 		        path);
 		return -1;
 	}
@@ -470,8 +400,6 @@ mcp_config_free(struct mcp_config *cfg)
 		cfg->api_keys      = NULL;
 		cfg->api_key_count = 0;
 	}
-	free(cfg->acl_allowed_modules);
-	cfg->acl_allowed_modules = NULL;
 }
 
 /* ---------------------------------------------------------- mcp_config_find_key

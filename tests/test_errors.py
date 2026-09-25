@@ -11,14 +11,16 @@ which kind of failure it was. Collapsing everything onto -32603 would make
 "your edit is wrong", worth retrying differently, indistinguishable from "the
 server is broken", not worth retrying at all.
 
-These tests also exercise yang/sysrepo-mcp.yang, which gives a list with a key
-and therefore covers list handling, key predicates and empty matches. The oven
-module has no list.
+These tests also exercise tests/sysrepo-mcp-test.yang, which mirrors the
+server YANG model (same list, same leaves, same namespaces), so that the full
+test suite can run against a private sysrepo repository without the production
+module. The module has a list with a key and therefore covers list handling,
+key predicates and empty matches. The oven module has no list.
 """
 
 import pytest
 
-API_KEY = "/sysrepo-mcp:api-key"
+API_KEY = "/sysrepo-mcp-test:api-key"
 
 # The key leaf is constrained to 16..256 characters.
 KEY_A = "test-key-aaaaaaaaaa"
@@ -32,13 +34,13 @@ KEY_B = "test-key-bbbbbbbbbb"
 
 def test_project_module_installs(installed_modules):
     """
-    yang/sysrepo-mcp.yang must be valid and installable.
+    tests/sysrepo-mcp-test.yang must be valid and installable.
 
     This is the only test that fails rather than skips when a module is
-    missing: it is the project's own model, and an unusable one makes every
-    runtime feature built on it unusable too.
+    missing: it is the project's test model (mirroring the server YANG model),
+    and an unusable one makes every runtime feature built on it unusable too.
     """
-    result = installed_modules["sysrepo-mcp"]
+    result = installed_modules["sysrepo-mcp-test"]
 
     assert result.available, f"{result.path} is missing"
     assert result.installed, f"sysrepoctl refused the module:\n{result.output}"
@@ -76,7 +78,7 @@ def test_strict_delete_of_an_absent_node_fails(clean_keys):
 def test_delete_removes_one_list_entry(clean_keys):
     clean_keys.edit_config(
         {
-            "sysrepo-mcp:api-key": [
+            "sysrepo-mcp-test:api-key": [
                 {"key": KEY_A, "user": "admin"},
                 {"key": KEY_B, "user": "operator"},
             ]
@@ -85,14 +87,14 @@ def test_delete_removes_one_list_entry(clean_keys):
 
     clean_keys.delete_config(f"{API_KEY}[key='{KEY_A}']")
 
-    entries = clean_keys.get_config(API_KEY)["data"]["sysrepo-mcp:api-key"]
+    entries = clean_keys.get_config(API_KEY)["data"]["sysrepo-mcp-test:api-key"]
 
     assert [entry["key"] for entry in entries] == [KEY_B]
 
 
 def test_delete_removes_the_whole_list(clean_keys):
     clean_keys.edit_config(
-        {"sysrepo-mcp:api-key": [{"key": KEY_A, "user": "admin"}]}
+        {"sysrepo-mcp-test:api-key": [{"key": KEY_A, "user": "admin"}]}
     )
 
     clean_keys.delete_config(API_KEY)
@@ -112,10 +114,10 @@ def test_empty_list_reads_as_empty_data(clean_keys):
 
 def test_a_list_entry_round_trips(clean_keys):
     clean_keys.edit_config(
-        {"sysrepo-mcp:api-key": [{"key": KEY_A, "user": "admin"}]}
+        {"sysrepo-mcp-test:api-key": [{"key": KEY_A, "user": "admin"}]}
     )
 
-    entries = clean_keys.get_config(API_KEY)["data"]["sysrepo-mcp:api-key"]
+    entries = clean_keys.get_config(API_KEY)["data"]["sysrepo-mcp-test:api-key"]
 
     assert entries == [{"key": KEY_A, "user": "admin"}]
 
@@ -123,14 +125,14 @@ def test_a_list_entry_round_trips(clean_keys):
 def test_several_list_entries_are_returned_as_an_array(clean_keys):
     clean_keys.edit_config(
         {
-            "sysrepo-mcp:api-key": [
+            "sysrepo-mcp-test:api-key": [
                 {"key": KEY_A, "user": "admin"},
                 {"key": KEY_B, "user": "operator"},
             ]
         }
     )
 
-    entries = clean_keys.get_config(API_KEY)["data"]["sysrepo-mcp:api-key"]
+    entries = clean_keys.get_config(API_KEY)["data"]["sysrepo-mcp-test:api-key"]
 
     assert isinstance(entries, list)
     assert {entry["key"] for entry in entries} == {KEY_A, KEY_B}
@@ -139,7 +141,7 @@ def test_several_list_entries_are_returned_as_an_array(clean_keys):
 def test_a_key_predicate_selects_one_entry(clean_keys):
     clean_keys.edit_config(
         {
-            "sysrepo-mcp:api-key": [
+            "sysrepo-mcp-test:api-key": [
                 {"key": KEY_A, "user": "admin"},
                 {"key": KEY_B, "user": "operator"},
             ]
@@ -147,7 +149,7 @@ def test_a_key_predicate_selects_one_entry(clean_keys):
     )
 
     selected = clean_keys.get_config(f"{API_KEY}[key='{KEY_A}']")
-    entries = selected["data"]["sysrepo-mcp:api-key"]
+    entries = selected["data"]["sysrepo-mcp-test:api-key"]
 
     assert len(entries) == 1
     assert entries[0]["user"] == "admin"
@@ -163,7 +165,7 @@ def test_a_list_entry_without_its_mandatory_leaf_is_refused(clean_keys):
     # user is mandatory: an entry without it must not reach the datastore.
     error = clean_keys.tool_error(
         "sr_edit_config",
-        {"config": {"sysrepo-mcp:api-key": [{"key": KEY_A}]}},
+        {"config": {"sysrepo-mcp-test:api-key": [{"key": KEY_A}]}},
     )
 
     assert error["code"] == -32002
@@ -173,7 +175,7 @@ def test_a_list_entry_without_its_mandatory_leaf_is_refused(clean_keys):
 def test_a_key_shorter_than_the_schema_allows_is_refused(clean_keys):
     error = clean_keys.tool_error(
         "sr_edit_config",
-        {"config": {"sysrepo-mcp:api-key": [{"key": "short", "user": "admin"}]}},
+        {"config": {"sysrepo-mcp-test:api-key": [{"key": "short", "user": "admin"}]}},
     )
 
     assert error["code"] == -32002
@@ -184,17 +186,17 @@ def test_server_state_is_not_writable(clean_keys):
     # silently ignored.
     error = clean_keys.tool_error(
         "sr_edit_config",
-        {"config": {"sysrepo-mcp:server-state": {"version": "9.9.9"}}},
+        {"config": {"sysrepo-mcp-test:server-state": {"version": "9.9.9"}}},
     )
 
     assert error["code"] in (-32002, -32602)
 
 
 def test_schema_of_the_project_module_is_introspectable(mcp_module):
-    tree = mcp_module.tool("get_tree", {"module": "sysrepo-mcp"})
+    tree = mcp_module.tool("get_tree", {"module": "sysrepo-mcp-test"})
     roots = tree["tree"]["nodes"]
 
-    assert tree["tree"]["namespace"] == "urn:sysrepo-mcp:server"
+    assert tree["tree"]["namespace"] == "urn:sysrepo-mcp:test"
     assert "api-key" in roots
     assert "server-state" in roots
     assert roots["api-key"]["type"] == "list"
@@ -206,7 +208,7 @@ def test_help_on_the_project_module(mcp_module):
 
     assert help_["node_type"] == "leaf"
     assert help_["mandatory"] is True
-    assert help_["module"] == "sysrepo-mcp"
+    assert help_["module"] == "sysrepo-mcp-test"
 
 
 # ---------------------------------------------------------------------------

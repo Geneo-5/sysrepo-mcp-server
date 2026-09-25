@@ -49,7 +49,7 @@ void serve(FCGX_Request *req);
  */
 
 void dispatch(FCGX_Request *req, const char *body, size_t len,
-	      struct mcp_session *mcp);
+	      struct mcp_session *mcp, const char *user);
 
 /* ------------------------------------------------------------------- stopping
  *
