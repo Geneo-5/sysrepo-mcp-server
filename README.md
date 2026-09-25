@@ -1,51 +1,56 @@
 # sysrepo-mcp
 
-Serveur MCP (Model Context Protocol) en C qui expose le datastore YANG
-[sysrepo](https://github.com/sysrepo/sysrepo) à un agent IA : lire et modifier
-la configuration, lire l'état opérationnel, exécuter des RPC et des actions,
-explorer les schémas YANG.
+An MCP (Model Context Protocol) server, written in C, that exposes the
+[sysrepo](https://github.com/sysrepo/sysrepo) YANG datastore to an AI agent:
+read and modify configuration, read operational state, invoke RPCs and
+actions, and explore YANG schemas.
 
-> **État du projet.** Le serveur est fonctionnel : transport FastCGI, cycle de
-> vie MCP, sessions (`Mcp-Session-Id`), outils de configuration, RPC, actions,
-> notifications, gestion des modules et introspection des schémas. Ce qui
-> manque : l'**authentification** et **NACM**, elog, et un stockage de sessions
-> partagé. La roadmap détaillée, qui fait autorité sur l'état réel du code, est
-> dans [`sphinx/todo.rst`](sphinx/todo.rst).
+> **Project status.** The server is functional: FastCGI transport, the MCP
+> lifecycle, sessions (`Mcp-Session-Id`), configuration tools, RPC, actions,
+> notifications, module management and schema introspection. Authentication
+> (API keys) and NACM are wired in, but per-operation authorization is not
+> yet enforced on RPCs and actions — see `sphinx/todo.rst`, P0.10. Still
+> missing: elog, and a shared session store. The detailed roadmap, which is
+> authoritative on the real state of the code, is in
+> [`sphinx/todo.rst`](sphinx/todo.rst).
 
-> **Ne pas exposer cette version à un agent non fiable.** Aucun contrôle
-> d'accès n'est appliqué : un agent obtient les droits de l'utilisateur système
-> qui exécute le serveur.
+> **Do not expose this version to an untrusted agent** without reading
+> `sphinx/todo.rst`, P0.10, first. Datastore reads and writes go through
+> sysrepo's NACM once authentication is configured, but RPCs and actions are
+> not checked against NACM before being invoked: an authenticated agent can
+> currently call any RPC or action of any installed module.
 
-> **`max-procs` doit valoir 1.** Une session, ses abonnements aux notifications
-> et sa file d'attente vivent dans le processus FastCGI qui les a créés. Avec
-> plusieurs processus, deux requêtes consécutives d'un même agent atterrissent
-> dans des processus différents et la session est introuvable.
+> **`max-procs` must be 1.** A session, its notification subscriptions and
+> its queue live in the FastCGI process that created it. With more than one
+> process, consecutive requests from the same agent can land in different
+> processes and the session is not found.
 
-## Fonctionnalités
+## Features
 
-- **Configuration** : lire, modifier et supprimer la configuration via l'API
-  sysrepo (`sr_get_config`, `sr_edit_config`, `sr_delete_config`).
-- **Monitoring** : lire l'état opérationnel (`sr_get_operational`).
-- **Opérations** : exécuter des RPC et des actions YANG.
-- **Notifications** : s'abonner aux notifications d'un module sur une session
-  et récupérer, à la demande, tout ce qui est arrivé depuis le dernier appel
-  (`sr_notif_subscribe`, `sr_notif_poll`). Par scrutation : ce transport ne
-  peut rien pousser.
-- **Modules** : lister, installer et désinstaller des modules YANG.
-- **Introspection** : explorer un schéma (`get_tree`) et documenter un nœud
-  (`get_help`), pour qu'un agent construise des XPath valides sans lire le
-  YANG.
-- **Sécurité** *(à faire)* : clé d'API par agent, associée à un utilisateur
-  NACM, et journalisation de chaque modification.
+- **Configuration**: read, modify and delete configuration through the
+  sysrepo API (`sr_get_config`, `sr_edit_config`, `sr_delete_config`).
+- **Monitoring**: read operational state (`sr_get_operational`).
+- **Operations**: invoke YANG RPCs and actions.
+- **Notifications**: subscribe a session to a module's notifications and
+  collect, on demand, everything that arrived since the last call
+  (`sr_notif_subscribe`, `sr_notif_poll`). By polling only — this transport
+  cannot push.
+- **Modules**: list, install and uninstall YANG modules.
+- **Introspection**: explore a schema (`get_tree`) and document a node
+  (`get_help`), so an agent can build valid XPaths without reading the YANG
+  source.
+- **Security**: an API key per agent, bound to a NACM user, and logging of
+  every configuration change. RPC/action-level authorization is still open —
+  see the project status above.
 
 ## Architecture
 
 ```
 ┌─────────────┐  HTTP  ┌───────────────┐ FastCGI ┌───────────────┐
-│   Agent IA  │◄──────►│ Reverse proxy │◄───────►│  sysrepo-mcp  │
-│ (client MCP)│  TLS   │ (lighttpd,    │         │  (ce projet)  │
+│  AI agent   │◄──────►│ Reverse proxy │◄───────►│  sysrepo-mcp  │
+│ (MCP client)│  TLS   │ (lighttpd,    │         │ (this project)│
 └─────────────┘        │  nginx)       │         └───────┬───────┘
-                       └───────────────┘                 │ linké
+                       └───────────────┘                 │ linked
                                                          ▼
                                                  ┌───────────────┐
                                                  │  libsysrepo   │
@@ -55,78 +60,98 @@ explorer les schémas YANG.
                                             ┌──────────────────────┐
                                             │ /etc/sysrepo (YANG,  │
                                             │ startup) + /dev/shm  │
-                                            │ (running, verrous)   │
+                                            │ (running, locks)     │
                                             └──────────────────────┘
 ```
 
-Deux choix structurants :
+Two decisions shape everything else:
 
-- **Transport FastCGI uniquement.** Le serveur ne parle jamais HTTP lui-même :
-  un reverse proxy termine HTTP et TLS, puis relaie en FastCGI. Pas de socket
-  publique, pas de SSE (voir *Limites*).
-- **sysrepo en bibliothèque.** `libsysrepo` est linkée dans le binaire et
-  appelée directement. Il n'y a aucun démon : sysrepo n'en a plus depuis la
-  version 2.
+- **FastCGI transport only.** The server never speaks HTTP itself: a reverse
+  proxy terminates HTTP and TLS and forwards to it over FastCGI. No public
+  socket, no SSE (see *Limitations*).
+- **sysrepo as a library.** `libsysrepo` is linked into the binary and
+  called directly. There is no daemon: sysrepo has had none since version 2.
 
-Détail complet dans [`sphinx/architecture.rst`](sphinx/architecture.rst).
+Full detail in [`sphinx/architecture.rst`](sphinx/architecture.rst).
 
-## Dépendances
+## Dependencies
 
-| Bibliothèque | Version | Origine | Rôle |
-|---|---|---|---|
-| **eBuild** | master | `extern/` | Système de build (non linké) |
-| **libyang** | 5.8.6 | `extern/` | Moteur YANG |
-| **sysrepo** | 5.1.0 | `extern/` | API datastore YANG |
-| **fcgi2** | 2.4.7 | `extern/` | Transport FastCGI (`libfcgi`) |
-| **stroll** | master | `extern/` | Structures de données |
-| **utils** | master | `extern/` | Utilitaires eTux |
-| **elog** | master | `extern/` | Journalisation |
-| **json-c** | `libjson-c-dev` | paquet Debian | JSON-RPC |
+| Library | Version | Role |
+|---|---|---|
+| **eBuild** | master | Build system (Kconfig-based Makefile framework, not linked) |
+| **libyang** | 5.8.6 | YANG engine |
+| **sysrepo** | 5.1.0 | YANG datastore API |
+| **fcgi2** | 2.4.7 | FastCGI transport (`libfcgi`) |
+| **stroll** | master | Data structures |
+| **utils** | master | eTux utilities |
+| **elog** | master | Logging |
+| **json-c** | `libjson-c-dev` | JSON-RPC |
 
-> **Important** : `extern/` est une destination de téléchargement, pas un
-> arbre de sources. Il est exclu de Git (voir `.gitignore`), peuplé par
-> `make -C docker extern`, et **ne doit jamais être modifié**. Le Dockerfile
-> monte chaque bibliothèque en lecture seule et compile dans une copie
-> jetable.
+All of these must already be built and installed on the machine that
+builds sysrepo-mcp — for example under `/usr/local`, discoverable through
+`PKG_CONFIG_PATH` — except `json-c`, which is a regular distribution
+package. Nothing in this repository downloads or builds them for a normal
+build.
 
-## Construction
+> `extern/` does **not** belong to this list. It is a read-only
+> reference/build-cache directory that is part of the agent- and
+> CI-oriented development environment described under *Reproducible build
+> & test environment* below — not something a regular build populates or
+> requires.
 
-La construction se fait **uniquement via Docker**.
+## Building
+
+Once the dependencies above are installed and discoverable via
+pkg-config:
 
 ```sh
-make -C docker build    # télécharge extern/ + construit l'image
-make -C docker run      # shell interactif, toutes les libs sont présentes
-make                    # compile build/sysrepo-mcp
+make config                # interactive eBuild/Kconfig menu
+# or: make defconfig       # non-interactive, built-in defaults
+make                        # compiles build/sysrepo-mcp
 make install PREFIX=/usr/local
 ```
 
-Ou depuis l'hôte, en une commande :
+`config.in` documents the available Kconfig options and their defaults; all
+of them are compile-time only, runtime configuration lives in a libconfig
+file (see *Usage* below).
+
+### Reproducible build & test environment (Docker)
+
+`docker/` and `extern/` together form a disposable, agent- and CI-oriented
+environment: `extern/` holds the pinned dependency sources, fetched with
+`make -C docker extern` (plain `curl`/`tar` targets, independent of Docker
+itself, and never edited in place), and the Docker image builds and
+installs all of them under `/usr/local` so CI or an AI agent gets a working
+toolchain without touching the host. It is not a requirement to build or
+deploy the server — see *Dependencies* above for the normal path. Full
+workflow in [docker/README.md](docker/README.md):
 
 ```sh
-scripts/build-docker.sh              # binaire
-scripts/build-docker.sh --doc        # binaire + documentation
-scripts/build-docker.sh --test       # binaire + suite de tests
-scripts/build-docker.sh --force      # re-télécharge extern/ et reconstruit l'image
+make -C docker build     # build the image (downloads extern/ first)
+make -C docker run       # interactive shell, every dependency in place
+make -C docker test      # run the pytest suite against it
 ```
 
-`make config` ouvre l'interface `menuconfig` d'eBuild ; les options et leurs
-valeurs par défaut sont dans `config.in`. `make defconfig` génère une
-configuration par défaut sans interaction.
-
-> Toutes les options de `config.in` sont des options de **compilation**. La
-> configuration modifiable à chaud (les clés d'API) est dans le modèle YANG
-> `yang/sysrepo-mcp.yang`.
-
-Le workflow Docker complet est décrit dans [docker/README.md](docker/README.md).
-
-## Utilisation
+`scripts/build-docker.sh` wraps the same image from the host, for a
+one-shot binary, documentation or test build:
 
 ```sh
-sysrepo-mcp [--help] [--version]
+scripts/build-docker.sh              # binary
+scripts/build-docker.sh --doc        # binary + documentation
+scripts/build-docker.sh --test       # binary + test suite
+scripts/build-docker.sh --force      # re-download extern/ and rebuild the image
 ```
 
-Sans argument, le processus attend d'être démarré comme application FastCGI
-par un serveur web. Exemple lighttpd :
+## Usage
+
+```sh
+sysrepo-mcp [--help] [--version] [-f | --config <file>]
+```
+
+With no argument, the process waits to be started as a FastCGI application
+by a web server, reading its runtime configuration from
+`/etc/sysrepo-mcp/sysrepo-mcp.conf` by default. Example lighttpd
+configuration:
 
 ```
 server.modules += ( "mod_fastcgi" )
@@ -143,32 +168,32 @@ fastcgi.server = (
 )
 ```
 
-### Exemple de session
+### Example session
 
 ```sh
-# 1. Ouvrir une session : l'identifiant revient dans l'en-tête
+# 1. Open a session: the identifier comes back in the header
 curl -i -X POST http://localhost/mcp \
      -H 'Content-Type: application/json' \
      -d '{"jsonrpc":"2.0","id":1,"method":"initialize",
           "params":{"protocolVersion":"2025-06-18"}}'
 
-# 2. S'abonner aux notifications, en répétant l'en-tête
+# 2. Subscribe to notifications, repeating the header
 curl -X POST http://localhost/mcp \
      -H 'Content-Type: application/json' \
-     -H 'Mcp-Session-Id: <identifiant>' \
+     -H 'Mcp-Session-Id: <identifier>' \
      -d '{"jsonrpc":"2.0","id":2,"method":"tools/call",
           "params":{"name":"sr_notif_subscribe",
                     "arguments":{"module":"oven"}}}'
 
-# 3. Relever ce qui est arrivé depuis la dernière fois
+# 3. Collect what arrived since the last call
 curl -X POST http://localhost/mcp \
      -H 'Content-Type: application/json' \
-     -H 'Mcp-Session-Id: <identifiant>' \
+     -H 'Mcp-Session-Id: <identifier>' \
      -d '{"jsonrpc":"2.0","id":3,"method":"tools/call",
           "params":{"name":"sr_notif_poll","arguments":{}}}'
 
-# 4. Fermer la session
-curl -X DELETE http://localhost/mcp -H 'Mcp-Session-Id: <identifiant>'
+# 4. Close the session
+curl -X DELETE http://localhost/mcp -H 'Mcp-Session-Id: <identifier>'
 ```
 
 ## Documentation
@@ -177,55 +202,56 @@ curl -X DELETE http://localhost/mcp -H 'Mcp-Session-Id: <identifiant>'
 scripts/build-docker.sh --doc        # HTML, PDF, info, man
 ```
 
-| Format | Sortie |
+| Format | Output |
 |---|---|
 | HTML | `build/doc/html/index.html` |
 | PDF | `build/doc/pdf/sysrepo-mcp.pdf` |
 | Info | `build/doc/info/sysrepo-mcp.info` |
 | Man | `build/doc/man/` |
 
-Les sources sont dans `sphinx/` : installation, architecture, référence API,
-licence, roadmap.
+The sources live in `sphinx/`: installation, architecture, API reference,
+license, roadmap.
 
-## Structure du projet
+## Project layout
 
 ```
-├── docker/                 # Environnement de build Docker
-│   ├── Dockerfile          # image de build (toutes les dépendances)
-│   ├── Makefile            # cibles build / build-nc / run / test / extern
-│   └── lighttpd.conf       # proxy FastCGI pour les tests
-├── extern/                 # Sources des dépendances (téléchargées, hors Git)
-├── include/sysrepo/mcp/    # En-têtes publics
+├── docker/                 # Agent/CI dev environment (build image, not required)
+│   ├── Dockerfile          # build image (every dependency pre-installed)
+│   ├── Makefile             # build / build-nc / run / test / extern targets
+│   └── lighttpd.conf        # FastCGI proxy used by the test suite
+├── extern/                 # Pinned dependency sources for docker/ (out of Git)
+├── include/sysrepo/mcp/    # Public headers
 ├── scripts/                # build-docker.sh, test.sh
 ├── sphinx/                 # Documentation (RST + Doxyfile)
-├── src/                    # Code source du serveur
-├── tests/                  # Suite pytest
-├── yang/                   # Modèle YANG du serveur
-├── config.in               # Options Kconfig (compilation)
-├── Makefile                # Point d'entrée eBuild
-└── ebuild.mk               # Déclaration du binaire
+├── src/                    # Server source code
+├── tests/                  # pytest suite
+├── config.in                # Kconfig options (build time)
+├── Makefile                 # eBuild entry point
+└── ebuild.mk                 # Binary declaration
 ```
 
-## Limites
+## Limitations
 
-- **Pas de SSE.** Le serveur répond à un POST par un unique objet JSON, ce que
-  la liaison Streamable HTTP de MCP autorise explicitement. C'est un choix de
-  périmètre, pas une impossibilité technique : FastCGI sait diffuser, mais le
-  buffering des proxies et le modèle `max-procs` s'y prêtent mal.
-  Conséquence : **les notifications sysrepo ne peuvent pas être poussées vers
-  l'agent**. Elles ne sont pas perdues pour autant — le serveur s'abonne à sa
-  place, met en file, et lui remet le tout quand il appelle `sr_notif_poll`.
-  Le sampling et l'elicitation MCP, eux, sont hors périmètre.
-- **`max-procs = 1`.** Les sessions sont locales au processus ; voir la
-  roadmap, milestone 1.
-- **Pas de transport direct.** HTTP, TLS et limitation de débit restent la
-  responsabilité du reverse proxy.
-- **Pas de contrôle d'accès.** Voir la roadmap, milestone 2.
+- **No SSE.** The server answers a POST with a single JSON object, which
+  the MCP Streamable HTTP binding explicitly allows. This is a scope
+  choice, not a technical impossibility: FastCGI can stream, but proxy
+  buffering and the `max-procs` process model are a poor fit for it.
+  Consequence: **sysrepo notifications cannot be pushed to the agent.**
+  They are not lost, though — the server subscribes on the agent's behalf,
+  queues them, and hands them all over when it calls `sr_notif_poll`. MCP
+  sampling and elicitation are out of scope for the same reason.
+- **`max-procs = 1`.** Sessions are local to the process; see the roadmap,
+  milestone 4.
+- **No direct transport.** HTTP, TLS and rate limiting stay the
+  responsibility of the reverse proxy.
+- **RPC/action authorization.** See the project status above and
+  `sphinx/todo.rst`, P0.10.
 
-## Licence
+## License
 
-LGPL-3.0-only. Voir [COPYING.LESSER](COPYING.LESSER) et [COPYING.txt](COPYING.txt).
+LGPL-3.0-only. See [COPYING.LESSER](COPYING.LESSER) and
+[COPYING.txt](COPYING.txt).
 
-Les bibliothèques linkées ont leurs propres licences : sysrepo et libyang sont
-en BSD-3-Clause, json-c en MIT, fcgi2 sous licence FastCGI. Détail dans
+The linked libraries have their own licenses: sysrepo and libyang are
+BSD-3-Clause, json-c is MIT, fcgi2 is under the FastCGI license. Detail in
 `sphinx/license.rst`.

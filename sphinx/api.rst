@@ -276,6 +276,9 @@ Tool catalogue
    * - ``sr_delete_config``
      - implemented
      - Delete configuration data
+   * - ``sr_diff_config``
+     - planned
+     - Compare two datastores over a subtree
    * - ``sr_get_operational``
      - implemented
      - Read operational state
@@ -600,6 +603,112 @@ Removing one API key:
    The XPath is evaluated, not matched literally: ``/oven:oven`` removes the
    whole container, and a path naming a list with no predicate removes every
    entry. There is no confirmation step and no undo.
+
+sr_diff_config
+~~~~~~~~~~~~~~
+
+*Status: planned.* Compares two datastores over a subtree and reports what
+differs, by reading both sides with ``sr_get_data()`` and handing the two
+trees to libyang's ``lyd_diff_siblings()``.
+
+This is not a sysrepo concept: sysrepo has no dry-run operation. The closest
+thing today is writing to ``candidate``, validating it, then comparing it
+against ``running`` by hand — exactly what this tool is meant to automate.
+See :doc:`todo`, P5, for the planning note.
+
+**Arguments**
+
+``source`` (string, required)
+   ``running``, ``startup`` or ``candidate``.
+
+``target`` (string, required)
+   ``running``, ``startup`` or ``candidate``, different from ``source``.
+
+``xpath`` (string, optional)
+   Subtree to compare. Default: the datastore root, i.e. every module.
+
+``max_depth`` (integer, optional)
+   Maximum subtree depth read from each side before diffing, 0 meaning
+   unlimited. Default 0.
+
+**Result**
+
+``diff`` (array of objects)
+   One entry per changed node, each with:
+
+   ``xpath`` (string)
+      Full path of the node, exactly as ``get_tree`` and ``get_schema``
+      report it (see :doc:`todo`, P2.1).
+
+   ``operation`` (string)
+      ``created``, ``deleted``, ``replaced`` or ``moved`` — libyang's
+      ``LYD_DIFF_OP_*`` by name.
+
+   ``value``
+      The node's new value or subtree for ``created``/``replaced``, as a
+      libyang JSON value or object. Absent for ``deleted``.
+
+   ``previous_value``
+      The value being replaced or deleted, for a leaf or leaf-list entry.
+      Absent for ``created``.
+
+   ``previous_position`` (string, optional)
+      For a ``moved`` entry in a user-ordered list or leaf-list: the
+      preceding sibling's key predicate or value, taken from libyang's
+      ``yang:key``/``yang:value`` diff metadata. Absent for a system-ordered
+      list, since sysrepo reports no position for those.
+
+``source`` (string), ``target`` (string), ``xpath`` (string)
+   Echo of the request.
+
+``changed`` (integer)
+   Number of entries in ``diff``.
+
+.. code-block:: json
+
+   {
+       "jsonrpc": "2.0",
+       "id": 95,
+       "method": "tools/call",
+       "params": {
+           "name": "sr_diff_config",
+           "arguments": {
+               "source": "running",
+               "target": "candidate",
+               "xpath": "/oven:oven"
+           }
+       }
+   }
+
+.. code-block:: json
+
+   {
+       "jsonrpc": "2.0",
+       "id": 95,
+       "result": {
+           "diff": [
+               {
+                   "xpath": "/oven:oven/temperature",
+                   "operation": "replaced",
+                   "value": 220,
+                   "previous_value": 200
+               }
+           ],
+           "source": "running",
+           "target": "candidate",
+           "xpath": "/oven:oven",
+           "changed": 1
+       }
+   }
+
+.. note::
+
+   Each side is read independently with ``sr_get_data()`` before diffing:
+   nothing here is transactional, so a concurrent write to either datastore
+   between the two reads can produce a diff that never existed as one
+   consistent snapshot. Acceptable for an agent comparing ``running``
+   against a ``candidate`` it just finished editing itself; not a substitute
+   for a real transaction (see :doc:`todo`, P5).
 
 Operational data
 ----------------

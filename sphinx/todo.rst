@@ -69,6 +69,29 @@ Running several agent sessions concurrently against one server is not a
 goal here — see *Not planned* below — so nothing in this backlog is about
 lifting ``max-procs = 1``.
 
+Findings from this review (not yet triaged into a priority)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- ``sphinx/api.rst``'s JSON-RPC error code table (``-32001``
+  Unauthenticated … ``-32008`` Session required) does not match
+  ``include/sysrepo/mcp/utilities.h``, where ``MCP_ERR_NOT_FOUND`` is
+  ``-32001``, ``MCP_ERR_VALIDATION`` is ``-32002``, ``MCP_ERR_DENIED`` is
+  ``-32003``, ``MCP_ERR_LOCKED`` is ``-32004``, ``MCP_ERR_TIMEOUT`` is
+  ``-32005`` and ``MCP_ERR_UNSUPPORTED`` is ``-32006``. Confirmed against
+  ``tests/test_schema.py``, which asserts ``-32001`` for a not-found node:
+  the code, not the doc, is what the tests were written against.
+  ``api.rst``'s error table needs rewriting from ``utilities.h``, and
+  ``-32007`` is currently unused in the header — either give it a meaning
+  or drop it from the doc.
+- ``config.in``'s top-of-file comment ("Configuration options that affect
+  runtime behavior are in ``yang/sysrepo-mcp.yang``") still refers to the
+  module P1.1 removed; it should point at the libconfig file instead.
+- ``README.md``'s "État du projet" callout still lists authentication and
+  NACM as missing, which contradicts both this page (P0 marked done) and
+  ``sphinx/architecture.rst`` ("fully enforced"). Settle this only once the
+  NACM gap in P0.10 below is resolved, since right now none of the three
+  is entirely accurate.
+
 P0 — Security (blocks any untrusted deployment)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -105,6 +128,20 @@ P0 — Security (blocks any untrusted deployment)
 9. ~~Cover authentication and NACM with tests once they exist. Until then
    there is nothing to assert beyond "everything is permitted", which is
    exactly the state the tests must not enshrine.~~
+10. **Reopened by this review.** ``sr_nacm_check_operation()`` is not
+    called anywhere in the source tree. ``sr_nacm_set_user()`` is set on
+    the session (item 6), so sysrepo's own data-level enforcement covers
+    ``sr_get_config``/``sr_edit_config``/``sr_delete_config``, but
+    ``rpc_common()`` in ``rpc.c`` sends the operation straight to
+    ``sr_rpc_send_tree()`` with no explicit authorization check first —
+    the code says so itself, in the comment above the call in
+    ``method_tools_call()`` (``transport.c``): "deferred to a follow-up
+    commit". Until this lands, an authenticated but unprivileged agent can
+    invoke any RPC or action of any installed module. Add the missing
+    ``sr_nacm_check_operation()`` call in ``rpc_common()`` before
+    ``sr_rpc_send_tree()``, and a test asserting a NACM-denied user gets
+    ``-32003`` on an RPC it may not call. Item 4 above should not be read
+    as covering this case.
 
 P1 — Configuration: drop the YANG module, adopt libconfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -158,28 +195,91 @@ P2 — Agent-usability gaps
 Smaller than a milestone individually, but each one currently forces an
 agent to guess or work around a limitation.
 
-1. **RPC input introspection.** ``get_help`` does not remount an RPC's input
-   parameters — e.g. ``time`` in ``insert-food`` is reported as type
-   ``unknown``, so the server cannot validate it and an agent cannot guess
-   the expected format. Add a ``get_input_schema`` tool, or a description on
-   the parent node in ``get_help``.
-2. **No feedback after write.** ``sr_edit_config`` returns ``{"ok": true}``
+1. **Merge get_tree and get_help into one xpath/depth-driven pair.**
+   ``get_tree`` and ``get_help`` currently disagree on how to select a
+   subtree: the former takes a required ``module`` plus an optional
+   ``xpath``, the latter a single mandatory ``xpath`` and never recurses.
+   Both should share the same two arguments instead:
+
+   - ``xpath`` (string, optional). Starting point of the walk. Omitted or
+     ``"/"`` means the datastore root — every implemented module, not just
+     one. ``module`` is dropped as a separate argument.
+   - ``max_depth`` (integer, optional, default ``0``). ``0`` means
+     unlimited recursion from ``xpath``; a positive value stops N levels
+     below the start node. The existing build-time
+     ``mcp_config_get()->max_tree_depth`` stays as a hard safety ceiling:
+     effective depth is ``max_depth == 0 ? config limit : min(max_depth,
+     config limit)``, so a caller cannot force unbounded recursion on a
+     pathological schema.
+
+   Sub-tasks, roughly in the order they unblock each other:
+
+   a. Factor the recursion out of ``schema_node_to_json()`` into a walker
+      taking ``(start node, or NULL for "every implemented module", xpath,
+      effective_depth)`` and a per-node callback, shared by both tools
+      below instead of duplicated.
+   b. Give every node its full xpath as a field of the node object itself,
+      not only in the side ``nodes`` flat array as today: an agent reading
+      the nested tree must never have to reconstruct a path from parent
+      names. Decide whether the flat ``nodes`` array is kept once xpath is
+      inline everywhere (redundant, but a smaller change for existing
+      clients) or dropped in the same breaking revision as (e).
+   c. ``get_tree``: extend the per-node JSON towards a transcription of
+      ``LYS_OUT_TREE`` (the shape ``yanglint -f tree`` prints). In addition
+      to the existing ``type``/``config``, add ``mandatory``, cardinality
+      for lists and leaf-lists (``min-elements``/``max-elements``), the key
+      list of a list, whether a container is ``presence``, choice/case
+      grouping, and whether the node comes from an ``augment``. This is new
+      information, not a reshuffle of what ``get_help`` already computes.
+   d. ``get_help`` → ``get_schema``: move ``add_leaf_help()`` and
+      ``res_add_range()`` (already correct for leaf/leaf-list) into the
+      shared walker so every visited node — not only the one named by
+      ``xpath`` — carries its full compiled detail: the JSON equivalent of
+      ``LYS_OUT_YANG_COMPILED``. While doing this, generalize the
+      ``must``/``when`` extraction, which today only runs for
+      ``LYS_LEAF``/``LYS_LEAFLIST`` even though ``lysc_node_container``,
+      ``lysc_node_list``, and RPC/action input/output nodes carry their own
+      ``musts``/``when`` too — the comment already sitting in
+      ``tool_get_help()`` right after the leaf block ("Must and when
+      assertions on the node itself") signals this was the intent, never
+      finished.
+   e. Rename ``tool_get_help`` to ``tool_get_schema`` throughout:
+      ``schema.c``, ``schema.h``, the ``tools[]`` entry in ``main.c``,
+      ``sphinx/api.rst``, ``README.md``, ``tests/test_schema.py``. No
+      backward-compatible alias: the server has no stable client base yet,
+      and the new contract subsumes the old single-node one (``max_depth``
+      omitted with an ``xpath`` naming a leaf behaves like today's
+      ``get_help``).
+   f. Decide, and record here, what happens when ``xpath`` is omitted on a
+      context with many large modules: cap the number of top-level modules
+      walked per call, require at least one of ``xpath``/a still-supported
+      module filter, or accept a possibly large response and rely on
+      ``max_depth`` to bound it.
+   g. Rewrite ``tests/test_schema.py`` for the merged contract: default
+      (whole datastore) call, ``max_depth`` of 0/1/2 on a known module,
+      xpath inline on nested nodes, non-leaf nodes reporting ``must``/
+      ``when`` once (d) lands.
+   h. Update ``sphinx/api.rst`` (arguments, result shape, worked example)
+      and the tool-status table in ``sphinx/architecture.rst``.
+
+2. **RPC input introspection**, folded into 1.d above: once ``get_schema``
+   recurses into RPC/action ``input``/``output`` nodes, ``time`` in
+   ``insert-food`` stops being reported as ``unknown`` on its own, without a
+   separate ``get_input_schema`` tool.
+3. **No feedback after write.** ``sr_edit_config`` returns ``{"ok": true}``
    but not how many nodes were modified. An agent cannot confirm the edit
    did what it expected.
-3. **Missing ``copy-config``.** A tool taking ``source`` and ``destination``
+4. **Missing ``copy-config``.** A tool taking ``source`` and ``destination``
    (datastore by datastore) to copy one datastore's content into another
    (e.g. ``startup → running``, ``candidate → running``) — the YANG
    equivalent of NETCONF's ``copy-config``.
-4. **Default values: minimum by default.** The call chain is
+5. **Default values: minimum by default.** The call chain is
    ``sr_get_config`` → ``sr_get_data()`` (without ``LYD_OPT_DEFAULT``) →
    ``tree_to_json()`` → ``lyd_print_mem()``: the returned tree only holds
    explicitly written leaves, and JSON printing does not add implicit
    values. ``sr_get_config`` should accept an ``options`` parameter
    (default ``0``) passed to ``tree_to_json()``: ``LYD_PRINT_WD_TRIM`` (16,
    the minimum) by default, ``LYD_PRINT_WD_ALL`` (32) to see everything.
-5. ``get_help`` still needs to report the node type, base type, units,
-   enumeration values, description and flags, ranges (as string arrays),
-   patterns and default values (in progress).
 6. ``sr_list_modules`` does not report enabled features.
 
 P3 — Logging and packaging
@@ -211,17 +311,41 @@ P4 — Tests to complete
    and needs its own throwaway one.
 
 P5 — Later / future features
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 No immediate blocker, but worth keeping on the radar.
 
-1. OAuth2 or JWT credentials, which the MCP authorization specification
-   builds on (builds on P0).
-2. Transactions spanning several tool calls, with explicit commit and
+1. Transactions spanning several tool calls, with explicit commit and
    rollback.
-3. A dry-run mode, validating an edit without committing it.
-4. A diff tool between two datastores.
-5. Metrics export.
+2. **A diff tool between two datastores.** Specified in
+   :doc:`api`, ``sr_diff_config``: ``source``/``target`` datastore,
+   ``xpath`` (default the datastore root) and ``max_depth`` (default 0 =
+   unlimited), reading both sides with ``sr_get_data()`` and diffing them
+   with libyang's ``lyd_diff_siblings()``. Implementation sub-tasks:
+
+   a. A ``diff_to_json()`` helper turning a ``struct lyd_node`` diff tree
+      into the flat ``diff`` array the spec describes — reusing
+      ``tree_to_json()``'s xpath-building logic rather than duplicating it.
+   b. Decide how ``max_depth`` interacts with reading each side: apply it to
+      the two ``sr_get_data()`` calls before diffing (cheaper, but a node
+      only different below the cutoff is invisible), or diff first and
+      truncate the reported paths afterwards (correct, more expensive). The
+      spec currently assumes the former; revisit if it proves misleading in
+      practice.
+   c. Surface libyang's ``yang:key``/``yang:value``/``yang:position``
+      diff metadata for moved entries in user-ordered lists and leaf-lists,
+      as ``previous_position`` — the one part of the diff format not a
+      straight transcription of ``lyd_diff_siblings()``'s own output.
+   d. Reject ``source == target`` with ``-32602`` rather than returning an
+      empty diff, since it is almost certainly a mistake.
+   e. Tests: a leaf changed, a list entry added/removed/reordered, and the
+      no-op case (empty ``diff``, ``changed: 0``).
+3. Metrics export.
+
+.. note::
+
+   **Not** on this list: OAuth2/JWT authentication, and a dedicated dry-run
+   mode. See *Not planned* below for why.
 
 Environment d'agent
 -------------------
@@ -420,6 +544,22 @@ Decisions already taken, recorded here so they are not re-litigated:
    stay local to a single FastCGI process, and ``max-procs = 1`` is the
    intended deployment, not a throughput ceiling to be lifted. Horizontal
    scaling and a shared session store are out of scope for the same reason.
+
+**OAuth2 / JWT authentication**
+   The MCP authorization specification builds on OAuth2/JWT, but adopting it
+   here would pull in a token-issuing/validation stack for a service meant
+   to stay small, simple, and with minimal footprint on the sysrepo
+   environment it sits next to. The libconfig API-key list plus NACM (see
+   P0) is the deliberately lighter mechanism this project uses instead, and
+   that trade-off is not expected to change.
+
+**A dedicated dry-run tool**
+   sysrepo itself has no dry-run operation to wrap. Writing to ``candidate``,
+   validating it, and comparing it against ``running`` already gets an agent
+   most of the way there — see ``sr_diff_config`` in :doc:`api` (P5) once it
+   exists, and the missing ``copy-config`` tool (P2.4) to promote a validated
+   ``candidate`` afterwards. A separate dry-run tool would only be
+   reconsidered if that combination proves insufficient in practice.
 
 Contributing
 ------------
