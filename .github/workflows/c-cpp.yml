@@ -17,7 +17,7 @@ jobs:
       # the documentation. The image layer is the slow part; everything else
       # runs inside it.
       - name: Build the image
-        run: make -C docker build
+        run: make -C docker build-nc
       - name: Build the binary and the documentation
         run: scripts/build-docker.sh --doc
       - name: Run the test suite
