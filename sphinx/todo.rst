@@ -82,17 +82,14 @@ Findings from this review (not yet triaged into a priority)
   ``sphinx/architecture.rst`` ("fully enforced"). P0.10 is now resolved, so
   this has been settled: ``README.md``, ``AGENTS.md`` and ``sphinx/api.rst``
   updated to match the code.
-- **P0.3 ("Store keys hashed") is marked done above but the code does not do
-  it.** ``load_auth()`` in ``src/libconfig.c`` copies ``key`` straight from
-  the libconfig file with ``xstrdup()`` into ``struct mcp_api_key.key``
-  (``include/sysrepo/mcp/libconfig.h``); ``mcp_config_find_key()`` compares
-  it byte-by-byte against the presented credential, which does resist a
-  timing attack, but the key sits in cleartext in the config file and in the
-  process's memory the whole time. Either re-open P0.3 (hash at load time,
-  compare against the hash) or reword it to describe what is actually
-  implemented (byte-by-byte comparison, not hashing) — the strikethrough
-  currently overstates the security property to a reader who has not read
-  the source.
+- **P0.3 ("Store keys hashed") was falsely marked done.** ``load_auth()`` in
+  ``src/libconfig.c`` copies each key from the libconfig file into
+  ``struct mcp_api_key.key``; ``mcp_config_find_key()`` compares that
+  plaintext value with the presented credential. The comparison processes
+  every byte (including length differences), but this does not protect
+  credentials at rest or in process memory. Reopened below: store a
+  one-way digest and compare digests in constant time. This requires a
+  documented configuration transition for existing plaintext keys.
 - ``sphinx/api.rst``'s error-code documentation (implementation-defined
   range and the sysrepo mapping table) did not match
   ``include/sysrepo/mcp/utilities.h`` at all — the codes were entirely
@@ -111,16 +108,12 @@ Findings from this review (not yet triaged into a priority)
   chapter's own opening warning, which already says authentication is
   implemented. Needs the same reconciliation pass as the other three docs.
 
-**Recent test runs exposed regressions; their fixes still need a green rerun.**
-One run reported 269 passing and three failures: the NACM-denied RPC returned
-``-32001`` because the isolated auth repository did not have ``oven``
-installed, and two oven read-back assertions lost ``false``/default-valued
-leaves after ``LYD_PRINT_WD_TRIM`` was made the implicit printer flag. The
-auth fixture now installs ``oven``, and ``sr_get_config`` preserves the old
-output when ``options`` is omitted. A subsequent run reported three protocol
-failures because ``sr_get_config``'s malformed input-schema JSON was exposed
-as an empty schema; the catalogue string was corrected. These corrections
-have not yet been verified by a complete passing run.
+**Test regressions from the previous development run are resolved.** The
+NACM fixture now installs ``oven``, ``sr_get_config`` preserves the previous
+default-leaf output when ``options`` is omitted, and the malformed
+``sr_get_config`` input-schema JSON was corrected. The full Docker suite
+passed after the MCP 2026-07-28 changes: 258 passed, 0 failed. Run it again
+after subsequent code changes.
 
 **Live oven audit not yet performed.** The user reports adding a sysrepo-mcp
 connection, but this Codex session exposes no sysrepo-mcp tool or resource:
@@ -129,14 +122,15 @@ contains plugin-management resources. Record runtime findings after that
 connection is available to the agent; do not infer live behavior from the
 local test fixtures.
 
-**MCP 2026-07-28 support is in progress.** The stateless request path,
+**MCP 2026-07-28 support is implemented and covered by the Docker suite.**
+The stateless request path,
 ``server/discover``, per-request metadata/header checks, and modern
 ``tools/list``/``tools/call`` results are implemented alongside legacy
 ``2025-11-25`` handshake support. Session-bound notification subscription
 tools are omitted from modern ``tools/list``. Modern requests with an
 ``Origin`` header are rejected by default because no browser-origin allow-list
-is configured. The modern test cases still need a passing Docker run before
-this implementation can be called verified.
+is configured, so browser clients require a future explicit allow-list
+configuration. The full suite passed with this behavior in place.
 
 P0 — Security (blocks any untrusted deployment)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -154,7 +148,12 @@ P0 — Security (blocks any untrusted deployment)
 2. ~~Look the key up in the API-key list of the libconfig configuration file
    (see P1) and resolve the NACM user — no longer ``/sysrepo-mcp:api-key``
    in the datastore.~~
-3. ~~Store keys hashed, and compare in constant time.~~
+3. **Reopened: keys are not hashed.** Store a one-way digest instead of the
+   plaintext credential and compare digests in constant time. Define and
+   document how ``api_keys[].key`` is configured (for example, explicit
+   digest field with a versioned algorithm), migrate examples and fixtures,
+   and test both accepted and rejected credentials. Do not claim protection
+   against a weak source key: API keys must have sufficient entropy.
 4. ~~``sr_nacm_init()`` at startup, ``sr_nacm_set_user()`` per request,
    ``sr_nacm_check_operation()`` before an RPC, ``sr_nacm_destroy()`` at exit
    — gated by ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``.~~
@@ -360,10 +359,11 @@ P4 — Tests to complete
    code will break first.
 2. Run the server under valgrind; the JSON reference counting and the
    notification queue deserve it.
-3. Exercise notification replay, which needs replay support enabled on a
+3. ~~Exercise notification replay, which needs replay support enabled on a
    module. A test now enables replay on ``oven``, emits an event before
    subscribing, then verifies the historical event and replay completion;
-   run it in Docker before marking this item done.
+   run it in Docker before marking this item done.~~ The full Docker suite
+   passed with the replay test enabled (258 passed, 0 failed).
 4. ~~Exercise queue overflow and the ``dropped`` counter.~~ The test sends
    ten notifications into an eight-entry test queue, verifies that two were
    dropped and drains the eight most recent entries.
