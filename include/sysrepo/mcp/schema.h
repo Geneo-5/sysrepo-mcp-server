@@ -15,18 +15,10 @@
 extern "C" {
 #endif /* __cplusplus */
 
-struct json_object *schema_node_to_json(const struct lysc_node *node,
-					int with_desc, int depth,
-					int effective_depth,
-					struct json_object *flat,
-					const char *parent_path);
-struct json_object *tool_get_tree(struct tool_ctx *ctx,
-				  struct json_object *args,
-				  struct mcp_err *err);
 const char *basetype_name(LY_DATA_TYPE type);
-struct json_object *tool_get_help(struct tool_ctx *ctx,
-				  struct json_object *args,
-				  struct mcp_err *err);
+struct json_object *tool_get_schema(struct tool_ctx *ctx,
+				    struct json_object *args,
+				    struct mcp_err *err);
 
 #ifdef __cplusplus
 }

@@ -21,8 +21,7 @@ from .conftest import MCP_PROTOCOL_VERSION
 # Every tool the server is expected to advertise.
 EXPECTED_TOOLS = {
     "get_status",
-    "get_tree",
-    "get_help",
+    "get_schema",
     "sr_get_config",
     "sr_edit_config",
     "sr_delete_config",
@@ -137,10 +136,17 @@ def test_every_tool_has_a_usable_input_schema(catalogue, name):
 
 def test_xpath_tools_require_an_xpath(catalogue):
     for name in ("sr_get_config", "sr_delete_config", "sr_get_operational",
-                 "sr_execute_rpc", "sr_action", "sr_notif_send", "get_help"):
+                 "sr_execute_rpc", "sr_action", "sr_notif_send"):
         assert "xpath" in catalogue[name]["inputSchema"].get("required", []), (
             f"{name} should require xpath"
         )
+
+
+def test_schema_xpath_is_optional(catalogue):
+    schema = catalogue["get_schema"]["inputSchema"]
+
+    assert "xpath" in schema["properties"]
+    assert "xpath" not in schema.get("required", [])
 
 
 def test_stateful_tools_are_documented_as_such(catalogue):

@@ -29,6 +29,8 @@ module sysrepo-mcp-test {
     }
 
     list api-key {
+        when "true()";
+        must "string-length(key) > 0";
         key "key";
 
         nacm:default-deny-all;

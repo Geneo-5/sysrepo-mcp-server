@@ -316,12 +316,9 @@ Tool catalogue
    * - ``get_status``
      - implemented
      - Server health and session counters
-   * - ``get_tree``
+   * - ``get_schema``
      - implemented
-     - Explore a YANG schema
-   * - ``get_help``
-     - implemented
-     - Document one schema node, including ranges, patterns and defaults
+     - Explore compiled YANG schema, including constraints and defaults
 
 Configuration tools
 -------------------
@@ -579,7 +576,7 @@ See :doc:`todo`, P5, for the planning note.
    One entry per changed node, each with:
 
    ``xpath`` (string)
-      Full path of the node, exactly as ``get_tree`` and ``get_schema``
+      Full path of the node, exactly as ``get_schema``
       report it (see :doc:`todo`, P2.1).
 
    ``operation`` (string)
@@ -1166,7 +1163,7 @@ sr_list_modules
 ~~~~~~~~~~~~~~~
 
 *Status: implemented.* Enumerates the modules in the libyang context, which is
-how an agent discovers what it may address before calling ``get_tree``.
+how an agent discovers what it may address before calling ``get_schema``.
 
 **Arguments**
 
@@ -1247,45 +1244,45 @@ Each entry of ``sessions`` carries ``session_id``, ``created``,
    ``/sysrepo-mcp:server-state`` through ``sr_get_operational``; this tool
    exists so that a liveness probe does not need the datastore to be readable.
 
-get_tree
-~~~~~~~~
+get_schema
+~~~~~~~~~~
 
-*Status: implemented.* Returns the schema tree of a module, so an agent can
-build valid XPaths without reading the YANG source.
+*Status: implemented.* Explore compiled YANG schemas. With no arguments, the
+tool returns every implemented module. Pass ``xpath`` to narrow the response
+to one node and its descendants. ``xpath: "/"`` has the same meaning as an
+omitted path.
 
 **Arguments**
-
-``module`` (string, required)
-   Module name, for example ``oven``.
 
 ``xpath`` (string, optional)
-   Subtree root inside the module. Default: the module root.
+   Absolute schema XPath, including the module prefix on its first segment.
+   For example, ``/oven:oven/temperature``. Omit it or pass ``/`` to inspect
+   all implemented modules.
 
-``max_depth`` (integer, optional)
-   Maximum number of levels below the selected root. Zero means unlimited,
-   subject to the configured schema depth ceiling. Default 0.
-
-``revision`` (string, optional)
-   Module revision. Default: the implemented one.
-
-``with_descriptions`` (boolean, optional)
-   Include the YANG ``description`` of each node. Default false.
+``max_depth`` (integer, optional, default 0)
+   Number of child levels to include below the selected node. Zero traverses
+   to the configured hard schema-depth limit; positive values are capped by
+   that same limit.
 
 **Result**
 
-``tree`` (object)
-   Hierarchical schema, with the module name, namespace, prefix and revision.
-   Each node carries its absolute ``xpath``, ``type``, ``config``,
-   ``mandatory``, and ``augmented`` fields. Containers include ``presence``;
-   lists and leaf-lists include ``min-elements`` and ``max-elements``; lists
-   also include their ``keys``. Nodes under choices and cases identify their
-   ``choice`` and ``case``.
+``modules`` (object)
+   Map keyed by module name. Each value has ``namespace``, ``prefix``,
+   ``revision`` and ``nodes``. ``nodes`` maps root node names to recursive
+   node objects. Each node includes its full ``xpath``, ``type``, ``config``,
+   ``mandatory``, ``module``, ``namespace``, ``must`` and ``when`` fields.
+   Nodes also include applicable compiled details: descriptions and
+   references; leaf types, ranges, patterns, values and defaults; list keys
+   and cardinality; presence containers; and choice/case and augment data.
+   RPC and action ``input``/``output`` nodes are traversable, and the paths
+   reported for their data leaves can be passed to the RPC/action tools.
 
-``nodes`` (array of objects)
-   Flat list, each with ``xpath``, ``type`` and ``config``.
+``count`` (integer)
+   Number of modules in the response (one for an XPath-specific request).
 
-``imports`` (array of strings)
-   Modules this one depends on.
+The hierarchy is the sole node representation; there is no duplicate flat
+``nodes`` array. ``base_type`` reports the built-in type resolved by libyang,
+not a typedef name.
 
 .. code-block:: json
 
@@ -1294,152 +1291,15 @@ build valid XPaths without reading the YANG source.
        "id": 70,
        "method": "tools/call",
        "params": {
-           "name": "get_tree",
-           "arguments": {
-               "module": "oven",
-               "with_descriptions": true
-           }
+           "name": "get_schema",
+           "arguments": {"xpath": "/oven:oven", "max_depth": 2}
        }
    }
 
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 70,
-       "result": {
-           "tree": {
-               "module": "oven",
-               "namespace": "urn:sysrepo:oven",
-               "prefix": "ov",
-               "revision": "2018-01-19",
-               "nodes": {
-                   "oven:oven": {
-                       "type": "container",
-                       "description": "Configuration container of the oven.",
-                       "children": {
-                           "turned-on": {
-                               "type": "leaf",
-                               "leaf-type": "boolean",
-                               "default": false,
-                               "description": "Main switch determining whether the oven is on or off."
-                           },
-                           "temperature": {
-                               "type": "leaf",
-                               "leaf-type": "uint8",
-                               "range": "0..250",
-                               "default": 0,
-                               "description": "Slider for configuring the desired temperature."
-                           }
-                       }
-                   },
-                   "oven:oven-state": {
-                       "type": "container",
-                       "config": false,
-                       "description": "State data container of the oven.",
-                       "children": {
-                           "temperature": {
-                               "type": "leaf",
-                               "leaf-type": "uint8",
-                               "description": "Actual temperature inside the oven."
-                           },
-                           "food-inside": {
-                               "type": "leaf",
-                               "leaf-type": "boolean",
-                               "description": "Informs whether the food is inside the oven or not."
-                           }
-                       }
-                   }
-               }
-           },
-           "nodes": [
-               {"xpath": "/oven:oven", "type": "container", "config": true},
-               {"xpath": "/oven:oven/turned-on", "type": "leaf", "config": true},
-               {"xpath": "/oven:oven/temperature", "type": "leaf", "config": true},
-               {"xpath": "/oven:oven-state", "type": "container", "config": false},
-               {"xpath": "/oven:oven-state/temperature", "type": "leaf", "config": false},
-               {"xpath": "/oven:oven-state/food-inside", "type": "leaf", "config": false},
-               {"xpath": "/oven:insert-food", "type": "rpc", "config": false},
-               {"xpath": "/oven:remove-food", "type": "rpc", "config": false}
-           ],
-           "imports": []
-       }
-   }
-
-get_help
-~~~~~~~~
-
-*Status: implemented.* Documents a single schema node.
-
-**Arguments**
-
-``xpath`` (string, required)
-   Path of the node to describe.
-
-**Result**
-
-``xpath`` (string), ``node_type`` (string), ``description`` (string),
-``mandatory`` (boolean), ``config`` (boolean), ``module`` (string) and
-``namespace`` (string).
-
-For a leaf or leaf-list: ``base_type`` (string), ``units`` (string, when
-declared), ``range`` (array of strings, for numeric types), ``length``
-(array of strings, for string/binary types), ``values`` (array, for
-enumeration/bits), ``fraction-digits`` (integer, for decimal64),
-``base`` (array, for identityref), ``path`` and ``require-instance``
-(for leafref), ``must`` (array of expressions) and ``when`` (array of
-expressions).
-
-A leaf also reports ``default`` (string). A leaf-list reports ``default``
-(array), ``min-elements`` (integer), ``max-elements`` (integer or the
-string ``"unbounded"``) and ``ordered-by`` (``"user"`` or ``"system"``).
-
-For a string type, the result also includes ``patterns`` (array of objects
-with ``pattern``, ``invert-match``, and optional ``description``).
-
-.. note::
-
-   ``base_type`` is the YANG built-in type, not the typedef name: a leaf of
-   type ``oven-temperature`` reports ``uint8``. The typedef name is not
-   recoverable from the compiled schema libyang hands over.
-
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 80,
-       "method": "tools/call",
-       "params": {
-           "name": "get_help",
-           "arguments": {
-               "xpath": "/oven:oven/temperature"
-           }
-       }
-   }
-
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 80,
-       "result": {
-           "xpath": "/oven:oven/temperature",
-           "node_type": "leaf",
-           "base_type": "uint8",
-           "range": ["0..250"],
-           "default": "0",
-           "description": "Slider for configuring the desired temperature.",
-           "mandatory": false,
-           "config": true,
-           "module": "oven",
-           "namespace": "urn:sysrepo:oven"
-       }
-   }
-
-.. note::
-
-   There is no ``module`` argument: the module is always taken from the
-   prefix of the first XPath segment, which is mandatory anyway.
+The result contains ``modules.oven.nodes.oven`` with a recursive ``children``
+object. Every node carries its absolute XPath; for example the temperature
+leaf is ``/oven:oven/temperature`` and includes ``base_type: "uint8"`` and
+``range: ["0..250"]``.
 
 Errors
 ------

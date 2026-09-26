@@ -40,9 +40,9 @@ actions, and explore YANG schemas.
   (`sr_notif_subscribe`, `sr_notif_poll`). By polling only — this transport
   cannot push.
 - **Modules**: list, install and uninstall YANG modules.
-- **Introspection**: explore a schema (`get_tree`) and document a node
-  (`get_help`), so an agent can build valid XPaths without reading the YANG
-  source.
+- **Introspection**: explore the compiled schema (`get_schema`) recursively,
+  including paths, constraints, defaults, RPC inputs and descriptions, so an
+  agent can build valid requests without reading the YANG source.
 - **Security**: an API key per agent, bound to a NACM user, with every
   operation — datastore reads/writes, RPCs and actions — checked against
   NACM, plus a module allow-list, an operation filter and write protection

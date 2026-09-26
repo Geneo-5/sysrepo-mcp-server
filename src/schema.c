@@ -5,7 +5,7 @@
  * Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
  ******************************************************************************
  *
- * Schema introspection: get_tree, get_help, schema_node_to_json, basetype_name.
+ * Schema introspection: get_schema and compiled node details.
  */
 
 #include <stdio.h>
@@ -46,8 +46,16 @@ schema_walk_node(const struct lysc_node *node, const char *xpath, int depth,
 		char child_xpath[1024];
 
 		for (child = lysc_node_child(node); child; child = child->next) {
-			snprintf(child_xpath, sizeof(child_xpath), "%s/%s",
-			         xpath, child->name);
+			if (child->nodetype == LYS_INPUT ||
+			    child->nodetype == LYS_OUTPUT) {
+				snprintf(child_xpath, sizeof(child_xpath), "%s", xpath);
+			} else if (child->module != node->module) {
+				snprintf(child_xpath, sizeof(child_xpath), "%s/%s:%s",
+				         xpath, child->module->name, child->name);
+			} else {
+				snprintf(child_xpath, sizeof(child_xpath), "%s/%s",
+				         xpath, child->name);
+			}
 			if (!children)
 				children = json_object_new_object();
 			json_object_object_add(children, child->name,
@@ -60,16 +68,59 @@ schema_walk_node(const struct lysc_node *node, const char *xpath, int depth,
 	return obj;
 }
 
-struct tree_callback_data {
-	int with_descriptions;
-	struct json_object *flat;
-};
+static void add_leaf_help(struct json_object *res,
+			  const struct lysc_type *type);
+
+static void
+tree_add_defaults(struct json_object *obj, const struct lysc_node *node)
+{
+	LY_ARRAY_COUNT_TYPE i;
+	const struct ly_ctx *ly = node->module->ctx;
+
+	if (node->nodetype == LYS_LEAF) {
+		const struct lysc_node_leaf *leaf =
+			(const struct lysc_node_leaf *)node;
+		if (node->flags & LYS_SET_DFLT) {
+			const char *canonical = NULL;
+			if (leaf->dflt.str && lyd_value_validate_dflt(
+			        node, leaf->dflt.str, leaf->dflt.prefixes,
+			        NULL, NULL, &canonical) == LY_SUCCESS) {
+				json_object_object_add(obj, "default",
+				                       json_object_new_string(canonical));
+				lydict_remove(ly, canonical);
+			}
+		}
+	} else if (node->nodetype == LYS_LEAFLIST) {
+		const struct lysc_node_leaflist *leaf =
+			(const struct lysc_node_leaflist *)node;
+		if (node->flags & LYS_SET_DFLT) {
+			struct json_object *defaults = json_object_new_array();
+			LY_ARRAY_FOR(leaf->dflts, i) {
+				const char *canonical = NULL;
+				if (leaf->dflts[i].str && lyd_value_validate_dflt(
+				        node, leaf->dflts[i].str,
+				        leaf->dflts[i].prefixes, NULL, NULL,
+				        &canonical) == LY_SUCCESS) {
+					json_object_array_add(defaults,
+					                     json_object_new_string(canonical));
+					lydict_remove(ly, canonical);
+				}
+			}
+			json_object_object_add(obj, "default", defaults);
+		}
+	}
+}
 
 static void
 tree_node_callback(struct json_object *obj, const struct lysc_node *node,
 		   const char *xpath, void *data)
 {
-	struct tree_callback_data *tree = data;
+	struct lysc_must *must;
+	struct lysc_when **when;
+	struct json_object *musts;
+	struct json_object *whens;
+	LY_ARRAY_COUNT_TYPE i;
+	(void)data;
 
 	json_object_object_add(obj, "type", nodetype_to_json(node->nodetype));
 	json_object_object_add(obj, "xpath", json_object_new_string(xpath));
@@ -131,85 +182,99 @@ tree_node_callback(struct json_object *obj, const struct lysc_node *node,
 		json_object_object_add(obj, "choice",
 		                       json_object_new_string(node->parent->name));
 	}
-	if (tree->with_descriptions && node->dsc)
+	if (node->dsc)
 		json_object_object_add(obj, "description",
 	                               json_object_new_string(node->dsc));
-	if (tree->flat) {
-		struct json_object *entry = json_object_new_object();
-		json_object_object_add(entry, "xpath", json_object_new_string(xpath));
-		json_object_object_add(entry, "type", nodetype_to_json(node->nodetype));
-		json_object_object_add(entry, "config",
-	                       json_object_new_boolean(
-	                               (node->flags & LYS_CONFIG_W) ? 1 : 0));
-		json_object_array_add(tree->flat, entry);
+	if (node->ref)
+		json_object_object_add(obj, "reference",
+	                               json_object_new_string(node->ref));
+	if (node->module) {
+		json_object_object_add(obj, "module",
+	                               json_object_new_string(node->module->name));
+		if (node->module->ns)
+			json_object_object_add(obj, "namespace",
+			                       json_object_new_string(node->module->ns));
 	}
+	if (node->nodetype == LYS_LEAF) {
+		const struct lysc_node_leaf *leaf =
+			(const struct lysc_node_leaf *)node;
+		add_leaf_help(obj, leaf->type);
+		if (leaf->units)
+			json_object_object_add(obj, "units",
+			                       json_object_new_string(leaf->units));
+	} else if (node->nodetype == LYS_LEAFLIST) {
+		const struct lysc_node_leaflist *leaf =
+			(const struct lysc_node_leaflist *)node;
+		add_leaf_help(obj, leaf->type);
+		if (leaf->units)
+			json_object_object_add(obj, "units",
+			                       json_object_new_string(leaf->units));
+	}
+	tree_add_defaults(obj, node);
+	musts = json_object_new_array();
+	must = lysc_node_musts(node);
+	LY_ARRAY_FOR(must, i) {
+		struct json_object *item = json_object_new_object();
+		json_object_object_add(item, "expression",
+		                       json_object_new_string(
+		                               lyxp_get_expr(must[i].cond)));
+		if (must[i].dsc)
+			json_object_object_add(item, "description",
+			                       json_object_new_string(must[i].dsc));
+		json_object_array_add(musts, item);
+	}
+	json_object_object_add(obj, "must", musts);
+	whens = json_object_new_array();
+	when = lysc_node_when(node);
+	LY_ARRAY_FOR(when, i)
+		json_object_array_add(whens,
+		                      json_object_new_string(
+		                              lyxp_get_expr(when[i]->cond)));
+	json_object_object_add(obj, "when", whens);
 }
 
-struct json_object *
-schema_node_to_json(const struct lysc_node *node, int with_desc, int depth,
-		    int effective_depth, struct json_object *flat,
-		    const char *parent_path)
+static struct json_object *
+schema_node_at_path(const struct lysc_node *node, const char *path,
+		    int effective_depth)
 {
-	char path[1024];
 	struct schema_walk walk = {
 		.depth_limit = effective_depth,
 		.callback = tree_node_callback,
 	};
-	struct tree_callback_data data = {
-		.with_descriptions = with_desc,
-		.flat = flat,
-	};
-
-	if (parent_path && *parent_path)
-		snprintf(path, sizeof(path), "%s/%s", parent_path, node->name);
-	else
-		snprintf(path, sizeof(path), "/%s:%s",
-		         node->module ? node->module->name : "", node->name);
-	walk.callback_data = &data;
-	return schema_walk_node(node, path, depth, &walk);
+	walk.callback_data = NULL;
+	return schema_walk_node(node, path, 0, &walk);
 }
 
-/* ------------------------------------------------------------------- get_tree
+/* ----------------------------------------------------------------- get_schema
  *
- * Return the YANG schema tree of a module. When `xpath` is provided, return
- * only the subtree rooted at that path (which may be a single node). Without
- * xpath, all data nodes, RPCs and notifications are returned across three
- * separate lists merged under `nodes`.
+ * Walk either a selected schema subtree or every implemented module. The
+ * response keeps module metadata separate and uses the recursive node tree
+ * as its sole path-bearing representation.
  */
-
 struct json_object *
-tool_get_tree(struct tool_ctx *ctx, struct json_object *args,
-              struct mcp_err *err)
+tool_get_schema(struct tool_ctx *ctx, struct json_object *args,
+		struct mcp_err *err)
 {
-	const char              *module;
-	const char              *xpath;
-
-	module = arg_string(args, "module");
-	if (!module) {
-		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
-			    "module is required");
-		return NULL;
-	}
-
-	xpath = arg_string(args, "xpath");
-	/* When xpath is NULL or "/", return the full module tree. */
-
-	const struct ly_ctx     *ly;
+	const char *xpath = arg_string(args, "xpath");
+	const struct ly_ctx *ly;
 	const struct lys_module *mod;
-	const struct lysc_node  *node;
-	struct json_object      *res;
-	struct json_object      *tree;
-	struct json_object      *nodes;
-	struct json_object      *roots;
-	int                      with_desc = arg_bool(args,
-	                                              "with_descriptions", 0);
-	int                      max_depth = arg_int(args, "max_depth", 0);
-	int                      effective_depth;
+	const struct lysc_node *selected = NULL;
+	struct json_object *res, *modules;
+	uint32_t index = 0;
+	int max_depth = arg_int(args, "max_depth", 0);
+	int effective_depth;
+	int count = 0;
 
 	if (xpath && strcmp(xpath, "/") && !xpath_wellformed(xpath)) {
 		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
 			    "xpath must be \"/\" or an absolute path with a "
 			    "module prefix; got \"%s\"", xpath);
+		return NULL;
+	}
+	if (args && json_object_object_get_ex(args, "xpath", &res) &&
+	    !json_object_is_type(res, json_type_string)) {
+		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+		            "xpath must be a string when provided");
 		return NULL;
 	}
 	if (max_depth < 0) {
@@ -228,77 +293,85 @@ tool_get_tree(struct tool_ctx *ctx, struct json_object *args,
 		return NULL;
 	}
 
-	mod = ly_ctx_get_module_implemented(ly, module);
-	if (!mod || !mod->compiled) {
-		mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
-			    "module \"%s\" is not implemented", module);
-		sr_session_release_context(ctx->sess);
-		return NULL;
-	}
-
-	tree = json_object_new_object();
-	nodes = json_object_new_array();
-	roots = json_object_new_object();
-
-	json_object_object_add(tree, "module",
-	                       json_object_new_string(mod->name));
-	json_object_object_add(tree, "namespace",
-	                       json_object_new_string(mod->ns ? mod->ns : ""));
-	json_object_object_add(tree, "prefix",
-	                       json_object_new_string(mod->prefix ?
-	                                              mod->prefix : ""));
-	json_object_object_add(tree, "revision",
-	                       json_object_new_string(mod->revision ?
-	                                              mod->revision : ""));
-
 	if (xpath && strcmp(xpath, "/")) {
-		node = lys_find_path(ly, NULL, xpath, 0);
-		if (!node) {
+		selected = lys_find_path(ly, NULL, xpath, 0);
+		if (!selected) {
 			mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
-				    "no schema node matches \"%s\"", xpath);
-			json_object_put(tree);
-			json_object_put(nodes);
-			json_object_put(roots);
+			            "no schema node matches \"%s\"", xpath);
 			sr_session_release_context(ctx->sess);
 			return NULL;
 		}
-		json_object_object_add(roots, node->name,
-	                       schema_node_to_json(node, with_desc, 0,
-	                                           effective_depth,
-	                                           nodes, NULL));
-	} else {
-		/* Data nodes, RPCs and notifications are three separate lists
-		 * in a compiled module; an agent needs all three. */
-		for (node = mod->compiled->data; node; node = node->next)
-			json_object_object_add(roots, node->name,
-			                       schema_node_to_json(
-			       node, with_desc, 0, effective_depth,
-			       nodes, NULL));
-
-		for (node = (const struct lysc_node *)mod->compiled->rpcs;
-		     node; node = node->next)
-			json_object_object_add(roots, node->name,
-			                       schema_node_to_json(
-			       node, with_desc, 0, effective_depth,
-			       nodes, NULL));
-
-		for (node = (const struct lysc_node *)mod->compiled->notifs;
-		     node; node = node->next)
-			json_object_object_add(roots, node->name,
-			                       schema_node_to_json(
-			       node, with_desc, 0, effective_depth,
-			       nodes, NULL));
+		mod = selected->module;
+		if (!mod || !mod->implemented || !mod->compiled) {
+			mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
+			            "the schema node is not in an implemented module");
+			sr_session_release_context(ctx->sess);
+			return NULL;
+		}
 	}
 
+	modules = json_object_new_object();
+	while (selected || (mod = ly_ctx_get_module_iter(ly, &index))) {
+		const struct lysc_node *node;
+		struct json_object *entry, *roots;
+		char path[1024];
+
+		if (!selected && (!mod->implemented || !mod->compiled)) {
+			continue;
+		}
+
+		entry = json_object_new_object();
+		roots = json_object_new_object();
+		json_object_object_add(entry, "namespace",
+		                       json_object_new_string(mod->ns ? mod->ns : ""));
+		json_object_object_add(entry, "prefix",
+		                       json_object_new_string(mod->prefix ? mod->prefix : ""));
+		json_object_object_add(entry, "revision",
+	                       json_object_new_string(mod->revision ? mod->revision : ""));
+
+		if (xpath && strcmp(xpath, "/")) {
+			json_object_object_add(roots, selected->name,
+			                       schema_node_at_path(
+			                       selected, xpath,
+			                       effective_depth));
+		} else {
+			for (node = mod->compiled->data; node; node = node->next) {
+				snprintf(path, sizeof(path), "/%s:%s", mod->name,
+				         node->name);
+				json_object_object_add(roots, node->name,
+				                       schema_node_at_path(node, path,
+				                                           effective_depth));
+			}
+			for (node = (const struct lysc_node *)mod->compiled->rpcs;
+			     node; node = node->next) {
+				snprintf(path, sizeof(path), "/%s:%s", mod->name,
+				         node->name);
+				json_object_object_add(roots, node->name,
+				                       schema_node_at_path(node, path,
+				                                           effective_depth));
+			}
+			for (node = (const struct lysc_node *)mod->compiled->notifs;
+			     node; node = node->next) {
+				snprintf(path, sizeof(path), "/%s:%s", mod->name,
+				         node->name);
+				json_object_object_add(roots, node->name,
+				                       schema_node_at_path(node, path,
+				                                           effective_depth));
+			}
+		}
+		json_object_object_add(entry, "nodes", roots);
+		json_object_object_add(modules, mod->name, entry);
+		count++;
+		if (selected) {
+			selected = NULL;
+			break;
+		}
+	}
 	sr_session_release_context(ctx->sess);
 
-	json_object_object_add(tree, "nodes", roots);
-
 	res = json_object_new_object();
-	json_object_object_add(res, "tree", tree);
-	json_object_object_add(res, "nodes", nodes);
-	json_object_object_add(res, "imports", json_object_new_array());
-
+	json_object_object_add(res, "modules", modules);
+	json_object_object_add(res, "count", json_object_new_int(count));
 	return res;
 }
 
@@ -330,12 +403,7 @@ basetype_name(LY_DATA_TYPE type)
 	}
 }
 
-/* ------------------------------------------------------------------- get_help
- *
- * Document one YANG schema node found by xpath. Returns node_type, mandatory,
- * config, description, reference, module, namespace, and for leaf/leaflist
- * nodes: base_type, values (for enum), and units.
- */
+/* Helpers for compiled leaf type information emitted by get_schema. */
 
 static void
 res_add_range(struct json_object *res, const struct lysc_range *range, LY_DATA_TYPE basetype)
@@ -480,157 +548,4 @@ add_leaf_help(struct json_object *res, const struct lysc_type *type)
 		break;
 	}
 	}
-}
-
-struct json_object *
-tool_get_help(struct tool_ctx *ctx, struct json_object *args,
-              struct mcp_err *err)
-{
-	const char             *xpath = arg_xpath(args, err);
-	const struct ly_ctx    *ly;
-	const struct lysc_node *node;
-	struct json_object     *res;
-	LY_ARRAY_COUNT_TYPE    i;
-
-	if (!xpath)
-		return NULL;
-
-	ly = sr_session_acquire_context(ctx->sess);
-	if (!ly) {
-		mcp_err_set(err, MCP_ERR_INTERNAL, "Internal error",
-			    "no libyang context on the session");
-		return NULL;
-	}
-
-	node = lys_find_path(ly, NULL, xpath, 0);
-	if (!node) {
-		mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
-			    "no schema node matches \"%s\"", xpath);
-		sr_session_release_context(ctx->sess);
-		return NULL;
-	}
-
-	res = json_object_new_object();
-	json_object_object_add(res, "xpath", json_object_new_string(xpath));
-	json_object_object_add(res, "node_type",
-	                       nodetype_to_json(node->nodetype));
-	json_object_object_add(res, "mandatory",
-	                       json_object_new_boolean(
-			       (node->flags & LYS_MAND_TRUE) ? 1 : 0));
-	json_object_object_add(res, "config",
-	                       json_object_new_boolean(
-			       (node->flags & LYS_CONFIG_W) ? 1 : 0));
-
-	if (node->dsc)
-		json_object_object_add(res, "description",
-		                       json_object_new_string(node->dsc));
-	if (node->ref)
-		json_object_object_add(res, "reference",
-		                       json_object_new_string(node->ref));
-	if (node->module) {
-		json_object_object_add(res, "module",
-		                       json_object_new_string(
-				       node->module->name));
-		if (node->module->ns)
-			json_object_object_add(res, "namespace",
-			                       json_object_new_string(
-				       node->module->ns));
-	}
-
-	if (node->nodetype & (LYS_LEAF | LYS_LEAFLIST)) {
-		const struct lysc_node_leaf *leaf = (const struct lysc_node_leaf *)node;
-		struct json_object *musts = json_object_new_array();
-		struct json_object *whens = json_object_new_array();
-		
-		add_leaf_help(res, leaf->type);
-		if (leaf->units)
-			json_object_object_add(res, "units", json_object_new_string(leaf->units));
-
-		LY_ARRAY_FOR(leaf->musts, i) {
-			struct json_object *obj =
-				json_object_new_object();
-			const char *expr =
-				lyxp_get_expr(leaf->musts[i].cond);
-
-			json_object_object_add(obj, "expression",
-				json_object_new_string(expr));
-			if (leaf->musts[i].dsc)
-				json_object_object_add(
-					obj, "description",
-					json_object_new_string(
-						leaf->musts[i].dsc));
-			json_object_array_add(musts, obj);
-		}
-		json_object_object_add(res, "must", musts);
-
-		LY_ARRAY_FOR(leaf->when, i) {
-			const char *expr = lyxp_get_expr(leaf->when[i]->cond);
-
-			json_object_array_add(whens, json_object_new_string(expr));
-		}
-		json_object_object_add(res, "when", whens);
-	}
-
-	/* Must and when assertions on the node itself.
-	 * musts is a sized array of lysc_must (by value, not
-	 * pointer); when is a sized array of lysc_when *. */
-
-	if (node->nodetype == LYS_LEAF) {
-		const struct lysc_node_leaf *leaf = (const struct lysc_node_leaf *)node;
-	
-		/* Default value. If the node carries a default (either explicit or
-		 * from its type), validate it and return the canonical string. */
-
-		if (node->flags & LYS_SET_DFLT) {
-			const char *raw = leaf->dflt.str;
-			const char *canonical = NULL;
-
-			if (raw && lyd_value_validate_dflt(
-				node, raw, leaf->dflt.prefixes,
-				NULL, NULL, &canonical) == LY_SUCCESS) {
-				json_object_object_add(res, "default",
-					json_object_new_string(canonical));
-				lydict_remove(ly, canonical);
-			}
-		}
-	}
-
-	if (node->nodetype == LYS_LEAFLIST) {
-		const struct lysc_node_leaflist *leaf = (const struct lysc_node_leaflist *)node;
-	
-		/* Default value. If the node carries a default (either explicit or
-		 * from its type), validate it and return the canonical string. */
-
-		if (node->flags & LYS_SET_DFLT) {
-			struct json_object *defaults = json_object_new_array();
-			
-			LY_ARRAY_FOR(leaf->dflts, i) {
-				const char *raw = leaf->dflts[i].str;
-				const char *canonical = NULL;
-
-				if (raw && lyd_value_validate_dflt(
-					node, raw, leaf->dflts[i].prefixes,
-					NULL, NULL, &canonical) == LY_SUCCESS) {
-					json_object_array_add(defaults,
-						json_object_new_string(canonical));
-					lydict_remove(ly, canonical);
-				}
-			}
-			json_object_object_add(res, "default", defaults);
-
-		}
-		json_object_object_add(res, "min-elements", json_object_new_int(leaf->min));
-		if (leaf->max)
-			json_object_object_add(res, "max-elements", json_object_new_int(leaf->max));
-		else
-			json_object_object_add(res, "max-elements", json_object_new_string("unbounded"));
-
-		json_object_object_add(res, "ordered-by",
-			json_object_new_string((leaf->flags & LYS_ORDBY_USER) ? "user" : "system"));
-		
-	}
-
-	sr_session_release_context(ctx->sess);
-
-	return res;
 }

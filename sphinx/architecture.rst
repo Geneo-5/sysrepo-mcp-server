@@ -477,18 +477,12 @@ The tool surface is specified in :doc:`api`. Summarised by area:
    * - ``get_status``
      - implemented
      - none, server-local counters
-   * - ``get_tree``
+   * - ``get_schema``
      - implemented
-     - ``lys_find_path()`` on the session context
-   * - ``get_help``
-     - implemented
-     - ``lysc_node`` introspection, including ranges, patterns and defaults
+     - shared recursive walk of the compiled schema, including constraints
 
 "Partial" means the handler works but does not produce every member the API
-reference documents; what is missing is stated there, tool by tool. No tool
-is currently in that state — see :doc:`todo`, P2.1 for the next contract
-change planned for ``get_help``/``get_tree``, which is scope work, not a
-gap in what exists today.
+reference documents; what is missing is stated there, tool by tool.
 
 Logging
 -------

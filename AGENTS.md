@@ -43,7 +43,7 @@ Résumé au moment de la rédaction. Le détail est dans `sphinx/todo.rst`.
 | Gestion des modules, introspection | fonctionnel |
 | Authentification (clés API, libconfig), NACM | **fonctionnels**, y compris sur les RPC/actions |
 | elog | **absent**, `fprintf(stderr)` à la place |
-| `get_help` : ranges, patterns, valeurs par défaut | **implémenté** |
+| `get_schema` : arborescence, détails compilés, ranges, patterns et valeurs par défaut | implémenté, validation à refaire |
 
 > **Le contrôle d'accès dépend de la configuration de déploiement.** Sans
 > clé API configurée (`auth.api_keys[]` dans le fichier libconfig), un agent

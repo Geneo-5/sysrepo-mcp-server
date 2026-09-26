@@ -46,7 +46,7 @@ Done
   ``sr_notif_list_subscriptions``, ``sr_notif_poll``, ``sr_notif_send``.
 - Module tools: ``sr_list_modules``, ``sr_module_install``,
   ``sr_module_uninstall``.
-- Introspection: ``get_status``, ``get_tree``, ``get_help``.
+- Introspection: ``get_status``, ``get_schema``.
 - ``SR_ERR_*`` mapped onto distinct JSON-RPC codes.
 - Source file split: ``main.c`` (FastCGI entry point, tool catalogue),
   ``config.c`` (``mcp_config_set()``/``mcp_config_get()``, sysrepo_open/close),
@@ -234,11 +234,9 @@ P2 — Agent-usability gaps
 Smaller than a milestone individually, but each one currently forces an
 agent to guess or work around a limitation.
 
-1. **Merge get_tree and get_help into one xpath/depth-driven pair.**
-   ``get_tree`` and ``get_help`` currently disagree on how to select a
-   subtree: the former takes a required ``module`` plus an optional
-   ``xpath``, the latter a single mandatory ``xpath`` and never recurses.
-   Both should share the same two arguments instead:
+1. ~~**Merge get_tree and get_help into one xpath/depth-driven tool.**~~
+   The former ``get_tree`` and ``get_help`` tools have been replaced by
+   ``get_schema``, which shares the optional ``xpath`` and ``max_depth`` arguments:
 
    - ``xpath`` (string, optional). Starting point of the walk. Omitted or
      ``"/"`` means the datastore root — every implemented module, not just
@@ -251,17 +249,12 @@ agent to guess or work around a limitation.
      config limit)``, so a caller cannot force unbounded recursion on a
      pathological schema.
 
-   Sub-tasks, roughly in the order they unblock each other:
+   Completed sub-tasks:
 
-   a. Factor the recursion out of ``schema_node_to_json()`` into a walker
-      taking ``(start node, or NULL for "every implemented module", xpath,
-      effective_depth)`` and a per-node callback, shared by both tools
-      below instead of duplicated.
-   b. Give every node its full xpath as a field of the node object itself,
-      not only in the side ``nodes`` flat array as today: an agent reading
-      the nested tree must never have to reconstruct a path from parent
-      names. Decision: drop the redundant flat ``nodes`` array in the same
-      breaking revision as (e).
+   a. ~~Factor recursion into a depth-aware node walker and per-node
+      callback.~~
+   b. ~~Put the full XPath on every recursive node and drop the duplicate
+      flat ``nodes`` array.~~
    c. ~~``get_tree``: extend the per-node JSON towards a transcription of
       ``LYS_OUT_TREE`` (the shape ``yanglint -f tree`` prints). In addition
       to the existing ``type``/``config``, add ``mandatory``, cardinality
@@ -270,7 +263,7 @@ agent to guess or work around a limitation.
       grouping, and whether the node comes from an ``augment``. This is new
       information, not a reshuffle of what ``get_help`` already computes.~~
       Implemented in the current tree output.
-   d. ``get_help`` → ``get_schema``: move ``add_leaf_help()`` and
+   d. ~~``get_help`` → ``get_schema``: move ``add_leaf_help()`` and
       ``res_add_range()`` (already correct for leaf/leaf-list) into the
       shared walker so every visited node — not only the one named by
       ``xpath`` — carries its full compiled detail: the JSON equivalent of
@@ -282,31 +275,31 @@ agent to guess or work around a limitation.
       ``tool_get_help()`` right after the leaf block ("Must and when
       assertions on the node itself") signals this was the intent, never
       finished.
-   e. Rename ``tool_get_help`` to ``tool_get_schema`` throughout:
+   e. ~~Rename ``tool_get_help`` to ``tool_get_schema`` throughout:
       ``schema.c``, ``schema.h``, the ``tools[]`` entry in ``main.c``,
       ``sphinx/api.rst``, ``README.md``, ``tests/test_schema.py``. No
       backward-compatible alias: the server has no stable client base yet,
       and the new contract subsumes the old single-node one (``max_depth``
       omitted with an ``xpath`` naming a leaf behaves like today's
-      ``get_help``).
-   f. Decide, and record here, what happens when ``xpath`` is omitted on a
+      ``get_help``).~~
+   f. ~~Decide, and record here, what happens when ``xpath`` is omitted on a
       context with many large modules: cap the number of top-level modules
       walked per call, require at least one of ``xpath``/a still-supported
       module filter, or accept a possibly large response and rely on
       ``max_depth`` to bound it. Decision: accept the full response; the
       configured hard depth ceiling bounds recursion, and clients can pass
       an XPath when they need a narrower result.
-   g. Rewrite ``tests/test_schema.py`` for the merged contract: default
+   g. ~~Rewrite ``tests/test_schema.py`` for the merged contract: default
       (whole datastore) call, ``max_depth`` of 0/1/2 on a known module,
       xpath inline on nested nodes, non-leaf nodes reporting ``must``/
       ``when`` once (d) lands.
-   h. Update ``sphinx/api.rst`` (arguments, result shape, worked example)
-      and the tool-status table in ``sphinx/architecture.rst``.
+   h. ~~Update ``sphinx/api.rst`` (arguments, result shape, worked example)
+      and the tool-status table in ``sphinx/architecture.rst``.~~
 
-2. **RPC input introspection**, folded into 1.d above: once ``get_schema``
+2. ~~**RPC input introspection**, folded into 1.d above: once ``get_schema``
    recurses into RPC/action ``input``/``output`` nodes, ``time`` in
    ``insert-food`` stops being reported as ``unknown`` on its own, without a
-   separate ``get_input_schema`` tool.
+   separate ``get_input_schema`` tool.~~
 3. **No feedback after write.** ``sr_edit_config`` returns ``{"ok": true}``
    but not how many nodes were modified. An agent cannot confirm the edit
    did what it expected.
@@ -406,9 +399,8 @@ Points positifs
   lecture/écriture de datastore, appels RPC, notifications, gestion de modules.
   Un agent n'a pas à mémoriser plusieurs API.
 
-- **Introspection riche.** ``get_status``, ``get_tree`` et ``get_help``
-  donnent module par module le schéma compilé, les valeurs par défaut, les
-  plages, les patterns et les descriptions. On peut naviguer un module inconnu
+- **Introspection riche.** ``get_status`` et ``get_schema`` donnent accès au schéma YANG compilé, aux
+  valeurs par défaut, aux plages, aux patterns et aux descriptions. On peut naviguer un module inconnu
   sans lire la documentation.
 
 - **XPath stable.** Le XPath est l'identifiant canonique de chaque nœud : pas
@@ -432,8 +424,7 @@ Points positifs
   erreur interne et agir en conséquence.
 
 - **Intégration YANG native.** ``sysrepo-mcp`` est linké contre libyang et
-  sysrepo. Les modifications du schéma se répercutent directement dans
-  ``get_tree`` et ``get_help``.
+  sysrepo. Les modifications du schéma se répercutent directement dans ``get_schema``.
 
 Build system
 ------------
@@ -513,7 +504,7 @@ Source layout
    ``sr_list_modules``, ``sr_module_install``, ``sr_module_uninstall``.
 
 ``src/schema.c``
-   ``get_tree``, ``get_help``, ``schema_node_to_json``, ``basetype_name``.
+   ``get_schema``, its recursive walker, and ``basetype_name``.
 
 ``src/status.c``
    ``get_status``.
@@ -555,7 +546,7 @@ Layout:
    device flow against ``oven-ready``.
 
 ``tests/test_schema.py``
-   ``get_tree`` and ``get_help`` against every node of the oven module.
+   ``get_schema`` against whole modules, selected subtrees, depth limits, and RPC inputs.
 
 ``tests/test_errors.py``
    Argument validation, the ``SR_ERR_*`` mapping, module listing, and the

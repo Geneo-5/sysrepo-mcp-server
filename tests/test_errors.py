@@ -193,20 +193,20 @@ def test_server_state_is_not_writable(clean_keys):
 
 
 def test_schema_of_the_project_module_is_introspectable(mcp_module):
-    tree = mcp_module.tool("get_tree", {"module": "sysrepo-mcp-test"})
-    roots = tree["tree"]["nodes"]
+    result = mcp_module.tool("get_schema", {})
+    module = result["modules"]["sysrepo-mcp-test"]
+    roots = module["nodes"]
 
-    assert tree["tree"]["namespace"] == "urn:sysrepo-mcp:test"
-    assert "api-key" in roots
-    assert "server-state" in roots
+    assert module["namespace"] == "urn:sysrepo-mcp:test"
     assert roots["api-key"]["type"] == "list"
-    assert roots["server-state"]["config"] is False
+    assert roots["api-key"]["children"]["server-state"]["config"] is False
 
 
-def test_help_on_the_project_module(mcp_module):
-    help_ = mcp_module.tool("get_help", {"xpath": f"{API_KEY}/user"})
+def test_schema_describes_a_project_module_leaf(mcp_module):
+    result = mcp_module.tool("get_schema", {"xpath": f"{API_KEY}/user"})
+    help_ = result["modules"]["sysrepo-mcp-test"]["nodes"]["user"]
 
-    assert help_["node_type"] == "leaf"
+    assert help_["type"] == "leaf"
     assert help_["mandatory"] is True
     assert help_["module"] == "sysrepo-mcp-test"
 
@@ -307,7 +307,7 @@ def test_error_replaces_the_result_rather_than_joining_it(mcp):
 @pytest.mark.parametrize(
     "tool",
     ["sr_get_config", "sr_delete_config", "sr_get_operational",
-     "sr_execute_rpc", "sr_action", "sr_notif_send", "get_help"],
+     "sr_execute_rpc", "sr_action", "sr_notif_send"],
 )
 def test_missing_xpath_is_invalid_params(mcp, tool):
     error = mcp.tool_error(tool, {})
@@ -321,10 +321,8 @@ def test_missing_config_is_invalid_params(mcp):
     assert error["code"] == -32602
 
 
-def test_missing_module_is_invalid_params(mcp):
-    error = mcp.tool_error("get_tree", {})
-
-    assert error["code"] == -32602
+def test_schema_can_start_at_all_modules(mcp):
+    assert isinstance(mcp.tool("get_schema", {})["modules"], dict)
 
 
 @pytest.mark.parametrize("value", [42, True, ["a"], {"a": 1}, None])

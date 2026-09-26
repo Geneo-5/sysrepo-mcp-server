@@ -197,23 +197,13 @@ const struct tool_desc tools[] = {
 	},
 	/* Schema introspection */
 	{
-		"get_tree",
-		"Return the YANG schema tree of a module.",
+		"get_schema",
+		"Explore compiled YANG schema, optionally from one XPath.",
 		"{\"type\":\"object\",\"properties\":{"
-		"\"module\":{\"type\":\"string\"},"
 		"\"xpath\":{\"type\":\"string\"},"
 		"\"max_depth\":{\"type\":\"integer\",\"minimum\":0,"
-		"\"default\":0},"
-		"\"with_descriptions\":{\"type\":\"boolean\","
-		"\"default\":false}},\"required\":[\"module\"]}",
-		tool_get_tree, 1
-	},
-	{
-		"get_help",
-		"Document one YANG schema node.",
-		"{\"type\":\"object\",\"properties\":{"
-		"\"xpath\":{\"type\":\"string\"}},\"required\":[\"xpath\"]}",
-		tool_get_help, 1
+		"\"default\":0}}}",
+		tool_get_schema, 1
 	},
 	/* Status */
 	{
