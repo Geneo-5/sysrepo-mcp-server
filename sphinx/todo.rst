@@ -325,20 +325,23 @@ P3 — Logging and packaging
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Integrate elog syslog, file and console back ends and its severity parser
-   on the command line. The implementation is in place; its Docker build has
-   not been verified yet.
+   on the command line. Done and compiled in Docker.
 2. Apply the log level and backend selection from libconfig. The implementation
    is in place; ``verbose`` selects debug severity unless ``--log-level`` is
-   given. Docker build verification is pending.
+   given. Done and compiled in Docker.
 3. ~~Ship a systemd unit and an example lighttpd fragment.~~ The sample
    unit runs lighttpd, which spawns the MCP responder through ``bin-path``.
    Directly starting the responder is not supported: ``FCGX_InitRequest()``
    uses descriptor 0 and the code has no ``FCGX_OpenSocket()`` path. Remove
    the old architecture claim that transport settings create a listener; an
    nginx-to-standalone-responder deployment remains future work.
-4. Revisit whether ``sr_module_install`` and ``sr_module_uninstall`` can be
+4. ~~Revisit whether ``sr_module_install`` and ``sr_module_uninstall`` can be
    allowed for identities with the right NACM permissions instead of being
-   denied outright. (P0 is done; the denial was a temporary blocker.)
+   denied outright.~~ Keep denying both tools whenever API-key authentication
+   is enabled. They are MCP tools rather than YANG RPCs/actions, so sysrepo's
+   NACM operation rules do not provide a permission to check. Without API-key
+   authentication they run with the FastCGI process's operating-system
+   privileges.
 
 P4 — Tests to complete
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -352,8 +355,11 @@ P4 — Tests to complete
    module.
 4. Exercise queue overflow and the ``dropped`` counter.
 5. Cover ``sr_module_install`` and ``sr_module_uninstall`` beyond argument
-   validation; a test that installs a module changes the shared repository
-   and needs its own throwaway one.
+   validation. A first round-trip against the suite's private repository
+   showed that ``sr_install_module()`` can report a timeout after logging that
+   the module was installed; sysrepo reports a repository lock held by the
+   server process. Resolve that interaction before adding an install test, and
+   verify cleanup after partial success.
 
 P5 — Later / future features
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
