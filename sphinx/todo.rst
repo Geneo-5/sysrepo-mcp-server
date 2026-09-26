@@ -275,7 +275,9 @@ agent to guess or work around a limitation.
       context with many large modules: cap the number of top-level modules
       walked per call, require at least one of ``xpath``/a still-supported
       module filter, or accept a possibly large response and rely on
-      ``max_depth`` to bound it.
+      ``max_depth`` to bound it. Decision: accept the full response; the
+      configured hard depth ceiling bounds recursion, and clients can pass
+      an XPath when they need a narrower result.
    g. Rewrite ``tests/test_schema.py`` for the merged contract: default
       (whole datastore) call, ``max_depth`` of 0/1/2 on a known module,
       xpath inline on nested nodes, non-leaf nodes reporting ``must``/

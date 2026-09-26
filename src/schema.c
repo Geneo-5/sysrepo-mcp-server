@@ -50,6 +50,7 @@ schema_node_to_json(const struct lysc_node *node, int with_desc, int depth,
 	}
 
 	json_object_object_add(obj, "type", nodetype_to_json(node->nodetype));
+	json_object_object_add(obj, "xpath", json_object_new_string(path));
 	json_object_object_add(obj, "config",
 	                       json_object_new_boolean(
 			       (node->flags & LYS_CONFIG_W) ? 1 : 0));

@@ -71,6 +71,7 @@ def test_tree_exposes_the_children_of_a_container(tree):
 
     assert set(children) == {"turned-on", "temperature"}
     assert children["temperature"]["type"] == "leaf"
+    assert children["temperature"]["xpath"] == "/oven:oven/temperature"
 
 
 def test_tree_exposes_the_rpcs(tree):

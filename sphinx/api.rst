@@ -1271,6 +1271,8 @@ build valid XPaths without reading the YANG source.
 
 ``tree`` (object)
    Hierarchical schema, with the module name, namespace, prefix and revision.
+   Every node object carries its absolute ``xpath`` as well as ``type`` and
+   ``config``.
 
 ``nodes`` (array of objects)
    Flat list, each with ``xpath``, ``type`` and ``config``.
