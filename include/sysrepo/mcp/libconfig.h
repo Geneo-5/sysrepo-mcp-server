@@ -102,7 +102,7 @@ void mcp_config_set_defaults(struct mcp_config *cfg);
  * against the same bounds as the Kconfig symbols they replace.
  *
  * Returns 0 on success. Returns -1 on a parse or validation error, after
- * printing a diagnostic to stderr; @cfg is left in a partially-updated but
+ * logging a diagnostic; @cfg is left in a partially-updated but
  * still safe-to-use state (defaults for anything not yet applied).
  */
 int mcp_config_load(const char *path, struct mcp_config *cfg);

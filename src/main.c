@@ -34,6 +34,8 @@
 #include <sysrepo/mcp/notifications.h>
 #include <sysrepo/mcp/schema.h>
 #include <sysrepo/mcp/status.h>
+#include <sysrepo/mcp/log.h>
+#include <sysrepo/mcp/log.h>
 
 /* --------------------------------------------------------------------- globals
  *
@@ -249,11 +251,13 @@ usage(FILE *out)
 		" - MCP server for the sysrepo datastore\n"
 		"\n"
 		"Usage: " CONFIG_PACKAGE_NAME " [ -f <file> ] [ --config <file> ]\n"
+		"             [ -l <severity> ] [ --log-level <severity> ]\n"
 		"             [ --help ] [ --version ]\n"
 		"\n"
 		"  -f, --config    path to the libconfig file\n"
 		"                  (default: /etc/sysrepo-mcp/" CONFIG_PACKAGE_NAME
 		".conf)\n"
+		"  -l, --log-level severity override (emerg..debug)\n"
 		"  --help      print this message and exit\n"
 		"  --version   print the version and exit\n"
 		"\n"
@@ -275,13 +279,12 @@ sysrepo_open(void)
 	sr_session_ctx_t *sess;
 
 	if ((rc = sr_connect(0, &g_conn)) != SR_ERR_OK) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": sr_connect: %s\n",
-		        sr_strerror(rc));
+		mcp_log_err("sr_connect: %s", sr_strerror(rc));
 		return rc;
 	}
 	ly_ctx = sr_acquire_context(g_conn);
 	if (ly_ctx == NULL) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": sr_acquire_context: failed\n");
+		mcp_log_err("sr_acquire_context failed");
 		sr_disconnect(g_conn);
 		g_conn = NULL;
 		return -1;
@@ -297,9 +300,7 @@ sysrepo_open(void)
 	if (rc != SR_ERR_OK) {
 		if (sess)
 			sr_session_stop(sess);
-		fprintf(stderr, CONFIG_PACKAGE_NAME
-			": warning: sr_nacm_init: %s (NACM disabled)\n",
-			sr_strerror(rc));
+		mcp_log_warn("sr_nacm_init: %s (NACM disabled)", sr_strerror(rc));
 	}
 
 	return SR_ERR_OK;
@@ -325,16 +326,20 @@ main(int argc, char *argv[])
 	int              opt;
 	static struct option long_options[] = {
 		{"config", required_argument, NULL, 'f'},
+		{"log-level", required_argument, NULL, 'l'},
 		{"help",   no_argument,       NULL, 'h'},
 		{"version",no_argument,       NULL, 'V'},
 		{NULL,     0,                 NULL,  0  }
 	};
 
-	while ((opt = getopt_long(argc, argv, "f:hV", long_options, NULL)) != -1) {
-		fprintf(stderr, "%c %s\n", opt, optarg);
+	const char       *log_level_arg = NULL;
+	while ((opt = getopt_long(argc, argv, "f:l:hV", long_options, NULL)) != -1) {
 		switch (opt) {
 		case 'f':
 			config_path = optarg;
+			break;
+		case 'l':
+			log_level_arg = optarg;
 			break;
 		case 'h':
 			usage(stdout);
@@ -348,8 +353,55 @@ main(int argc, char *argv[])
 		}
 	}
 
+
+	struct mcp_config cfg, bootstrap;
+	mcp_config_set_defaults(&cfg);
+	bootstrap = cfg;
+	bootstrap.log_file[0] = '\0';
+	if (mcp_log_init(&bootstrap) < 0)
+		return EXIT_FAILURE;
+
+	if (mcp_config_load(config_path, &cfg) < 0)
+		mcp_log_warn("could not load config file %s; using available defaults",
+		             config_path);
+	if (cfg.log_verbose && !log_level_arg)
+		cfg.log_level = ELOG_DEBUG_SEVERITY;
+	if (log_level_arg) {
+		struct elog_syslog_conf defaults = {
+			.super.severity = cfg.log_level,
+			.format = ELOG_PID_FMT,
+			.facility = LOG_DAEMON,
+		};
+		struct elog_syslog_conf parsed = defaults;
+		struct elog_parse parse;
+		int parse_rc;
+
+		elog_init_syslog_parse(&parse, &parsed, &defaults);
+		parse_rc = elog_parse_syslog_severity(&parse, &parsed,
+		                                     log_level_arg);
+		if (!parse_rc)
+			parse_rc = elog_realize_parse(&parse, &parsed.super);
+		if (parse_rc) {
+			mcp_log_err("invalid --log-level '%s': %s", log_level_arg,
+			            parse.error ? parse.error : "invalid severity");
+			elog_fini_parse(&parse);
+			mcp_config_free(&cfg);
+			mcp_log_close();
+			return EXIT_FAILURE;
+		}
+		cfg.log_level = parsed.super.severity;
+		elog_fini_parse(&parse);
+	}
+	mcp_config_set(&cfg);
+	if (mcp_log_init(mcp_config_get()) < 0) {
+		mcp_config_free(&cfg);
+		return EXIT_FAILURE;
+	}
+	mcp_config_free(&cfg);
+
 	if (FCGX_Init()) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": FCGX_Init failed\n");
+		mcp_log_err("FCGX_Init failed");
+		mcp_log_close();
 		return EXIT_FAILURE;
 	}
 
@@ -359,9 +411,9 @@ main(int argc, char *argv[])
 	 * req.envp, never in the process environment.
 	 */
 	if (FCGX_IsCGI()) {
-		fprintf(stderr,
-		        CONFIG_PACKAGE_NAME ": not started as a FastCGI application.\n"
-		        "Run it behind a reverse proxy, or use --help.\n");
+		mcp_log_err("not started as a FastCGI application; run behind a "
+		            "reverse proxy or use --help");
+		mcp_log_close();
 		return EXIT_FAILURE;
 	}
 
@@ -369,44 +421,33 @@ main(int argc, char *argv[])
 	sa.sa_handler = on_signal;
 	sigemptyset(&sa.sa_mask);
 	if (sigaction(SIGINT, &sa, NULL) || sigaction(SIGTERM, &sa, NULL)) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": sigaction: %s\n",
-		        strerror(errno));
+		mcp_log_err("sigaction: %s", strerror(errno));
+		mcp_log_close();
 		return EXIT_FAILURE;
 	}
 	signal(SIGPIPE, SIG_IGN);
 
-	if (sysrepo_open() != SR_ERR_OK)
+	if (sysrepo_open() != SR_ERR_OK) {
+		mcp_log_close();
 		return EXIT_FAILURE;
+	}
 
 	g_start_time = time(NULL);
 
-	/* Load runtime configuration from libconfig file. */
-
-	struct mcp_config cfg;
-
-	mcp_config_set_defaults(&cfg);
-
-	if (mcp_config_load(config_path, &cfg) < 0)
-		fprintf(stderr, CONFIG_PACKAGE_NAME
-			": warning: could not load config file, "
-			"using built-in defaults\n");
-	mcp_config_set(&cfg);
-
 	if (sessions_init(mcp_config_get()->max_sessions) < 0) {
-		mcp_config_free(&cfg);
 		sysrepo_close();
+		mcp_log_close();
 		return EXIT_FAILURE;
 	}
-
-	mcp_config_free(&cfg);
 
 	if (FCGX_InitRequest(&req, 0, 0)) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": FCGX_InitRequest failed\n");
+		mcp_log_err("FCGX_InitRequest failed");
 		sysrepo_close();
+		mcp_log_close();
 		return EXIT_FAILURE;
 	}
 
-	fprintf(stderr, CONFIG_PACKAGE_NAME " " CONFIG_PACKAGE_VERSION ": ready\n");
+	mcp_log_info("%s ready", CONFIG_PACKAGE_VERSION);
 
 	while (!stopping && FCGX_Accept_r(&req) >= 0) {
 		serve(&req);
@@ -418,7 +459,8 @@ main(int argc, char *argv[])
 	FCGX_Free(&req, 1);
 	sysrepo_close();
 
-	fprintf(stderr, CONFIG_PACKAGE_NAME ": stopped\n");
+	mcp_log_info("stopped");
+	mcp_log_close();
 
 	return EXIT_SUCCESS;
 }

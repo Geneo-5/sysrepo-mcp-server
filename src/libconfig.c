@@ -23,6 +23,7 @@
 #include <libconfig.h>
 
 #include <sysrepo/mcp/libconfig.h>
+#include <sysrepo/mcp/log.h>
 
 /* ---------------------------------------------------------------------- ranges
  *
@@ -60,8 +61,7 @@ xstrdup(const char *s)
 
 	out = strdup(s);
 	if (out == NULL)
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: out of memory "
-		        "duplicating \"%s\"\n", s);
+		mcp_log_err("libconfig: out of memory duplicating \"%s\"", s);
 	return out;
 }
 
@@ -80,9 +80,8 @@ copy_string(char *dst, size_t dst_size, const char *src)
 
 	len = strlen(src);
 	if (len >= dst_size) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: value \"%s\" is "
-		        "too long (max %zu characters), truncating\n",
-		        src, dst_size - 1);
+		mcp_log_warn("libconfig: value \"%s\" is too long (max %zu characters), truncating",
+		            src, dst_size - 1);
 		len = dst_size - 1;
 	}
 	memcpy(dst, src, len);
@@ -96,8 +95,8 @@ static int
 check_range_uint(const char *name, long long value, long long min, long long max)
 {
 	if (value < min || value > max) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s = %lld is out "
-		        "of range [%lld, %lld]\n", name, value, min, max);
+		mcp_log_err("libconfig: %s = %lld is out of range [%lld, %lld]",
+		           name, value, min, max);
 		return -1;
 	}
 	return 0;
@@ -214,9 +213,8 @@ load_transport(config_t *cc, struct mcp_config *cfg)
 			cfg->transport_unix = 0;
 			cfg->transport_tcp  = 1;
 		} else {
-			fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: "
-			        "server.transport.mode must be \"unix\" or "
-			        "\"tcp\", got \"%s\"\n", mode);
+			mcp_log_err("libconfig: server.transport.mode must be \"unix\" or "
+			            "\"tcp\", got \"%s\"", mode);
 			return -1;
 		}
 	}
@@ -257,9 +255,7 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 		} else if (!strcmp(method, "cookie")) {
 			cfg->auth_method = 2;
 		} else {
-			fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: "
-			        "server.auth.method must be \"none\", \"bearer\" "
-			        "or \"cookie\", got \"%s\"\n", method);
+			mcp_log_err("libconfig: server.auth.method must be \"none\", \"bearer\" or \"cookie\", got \"%s\"", method);
 			return -1;
 		}
 	}
@@ -276,8 +272,7 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 
 	list = calloc((size_t)count, sizeof(*list));
 	if (list == NULL) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: out of memory "
-		        "loading %d API key(s)\n", count);
+		mcp_log_err("libconfig: out of memory loading %d API key(s)", count);
 		return -1;
 	}
 
@@ -288,9 +283,8 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 		elem = config_setting_get_elem(keys, (unsigned)i);
 		if (!config_setting_lookup_string(elem, "key", &key_str) ||
 		    !config_setting_lookup_string(elem, "user", &user_str)) {
-			fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: "
-			        "server.auth.api_keys[%d] needs both \"key\" "
-			        "and \"user\"\n", i);
+			mcp_log_err("libconfig: server.auth.api_keys[%d] needs both "
+			            "\"key\" and \"user\"", i);
 			for (i--; i >= 0; i--) {
 				free(list[i].key);
 				free(list[i].user);
@@ -355,8 +349,8 @@ mcp_config_load(const char *path, struct mcp_config *cfg)
 	config_init(&cc);
 
 	if (!config_read_file(&cc, path)) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s:%d: %s\n",
-		        path, config_error_line(&cc), config_error_text(&cc));
+		mcp_log_err("libconfig: %s:%d: %s", path, config_error_line(&cc),
+		           config_error_text(&cc));
 		config_destroy(&cc);
 		return -1;
 	}
@@ -374,9 +368,8 @@ mcp_config_load(const char *path, struct mcp_config *cfg)
 	config_destroy(&cc);
 
 	if (rc == 0 && cfg->transport_unix && cfg->transport_tcp) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": libconfig: %s: "
-		        "server.transport.mode cannot be both unix and tcp\n",
-		        path);
+		mcp_log_err("libconfig: %s: server.transport.mode cannot be both unix and tcp",
+		           path);
 		return -1;
 	}
 

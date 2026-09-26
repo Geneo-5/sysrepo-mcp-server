@@ -13,8 +13,8 @@ actions, and explore YANG schemas.
 > and NACM are wired in and enforced on every operation, including RPCs and
 > actions
 > (`sr_nacm_check_operation()` in `rpc_common()`) — P0 in `sphinx/todo.rst`
-> is complete. Still missing: elog (still `fprintf(stderr)`), and a shared
-> session store (`max-procs` must stay 1). The detailed roadmap, which is
+> is complete. Logging uses elog with configurable syslog, file and console
+> back ends. The shared session store is still absent (`max-procs` must stay 1). The detailed roadmap, which is
 > authoritative on the real state of the code, is in
 > [`sphinx/todo.rst`](sphinx/todo.rst).
 
@@ -151,7 +151,7 @@ scripts/build-docker.sh --force      # re-download extern/ and rebuild the image
 ## Usage
 
 ```sh
-sysrepo-mcp [--help] [--version] [-f | --config <file>]
+sysrepo-mcp [--help] [--version] [-f <file>] [-l <severity>]
 ```
 
 With no argument, the process waits to be started as a FastCGI application

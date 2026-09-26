@@ -8,11 +8,8 @@ peers, and how it is configured.
 
 .. warning::
 
-   Implementation status. The FastCGI transport, the MCP lifecycle, sessions,
-   the sysrepo tools, the notification tools, authentication (API keys, NACM,
-   module filter, write protection) are implemented.  Only elog remains to be
-   integrated.  Do not expose this build to an untrusted agent until the
-   deployment config enables authentication and ACL.
+   Access control depends on deployment configuration. Do not expose an
+   instance to an untrusted agent until API keys and NACM rules are configured.
 
 Overview
 --------
@@ -490,17 +487,16 @@ reference documents; what is missing is stated there, tool by tool.
 Logging
 -------
 
-.. warning::
+The server uses ``elog`` for syslog, append-only file, and console back ends.
+The back ends can be combined. libconfig selects them through
+``server.log.syslog_enabled``, ``server.log.console`` and ``server.log.file``;
+``server.log.level`` sets the severity threshold, and ``server.log.verbose``
+enables debug severity unless ``--log-level`` overrides it. The command line
+accepts elog severity names with ``--log-level``.
 
-   Not implemented. The current code writes to ``stderr`` with ``fprintf()``.
-
-`elog <https://github.com/grgbr/elog>`_ is to provide syslog, file and console
-back ends together with a command-line parser for the log configuration. Under
-FastCGI, syslog is the only reliable sink: ``stdout`` belongs to the response
-body, and ``stderr`` is captured by the proxy.
-
-Two log streams have to stay separate: the server's own log, and the sysrepo
-library log, which is redirected with ``sr_log_set_cb()``.
+Console output goes to ``stderr``, which FastCGI proxies commonly capture in
+their own error log. Sysrepo library messages are forwarded through
+``sr_log_set_cb()`` into the same configured logger.
 
 Deployment
 ----------
@@ -570,6 +566,6 @@ Summary
   process, which forces ``max-procs = 1``.
 - sysrepo is linked as a library; there is no daemon, and the running datastore
   lives in shared memory.
-- Build-time configuration is Kconfig; runtime configuration is YANG.
-- Access control is delegated to sysrepo NACM, keyed by the configured API
-  keys, and is fully enforced; only elog remains to be integrated.
+- Build-time configuration is Kconfig; runtime configuration is libconfig.
+- Access control is delegated to sysrepo NACM and fully enforced for configured
+  API keys; logging is configurable through elog.

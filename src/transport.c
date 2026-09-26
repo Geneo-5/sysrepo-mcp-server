@@ -26,6 +26,7 @@
 #include <sysrepo/mcp/sessions.h>
 #include <sysrepo/mcp/transport.h>
 #include <sysrepo/mcp/libconfig.h>
+#include <sysrepo/mcp/log.h>
 
 /* External state from main.c. */
 
@@ -200,7 +201,7 @@ method_initialize(FCGX_Request *req, struct json_object *id,
 	 * the Streamable HTTP binding puts it, and where a client looks. */
 	snprintf(header, sizeof(header), "Mcp-Session-Id: %s\r\n", sess->id);
 
-	fprintf(stderr, CONFIG_PACKAGE_NAME ": session %s created\n", sess->id);
+	mcp_log_info("session %s created", sess->id);
 
 	rpc_send_result(req, header, id, result);
 }
@@ -308,9 +309,9 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 	}
 
 	/* P0.8: log the identity of the requester with every operation. */
-	fprintf(stderr, CONFIG_PACKAGE_NAME ": %s: %s called by %s\n",
-	        mcp ? mcp->id : "(no session)", desc->name,
-	        mcp && mcp->user ? mcp->user : "(anonymous)");
+	mcp_log_info("%s: %s called by %s",
+	            mcp ? mcp->id : "(no session)", desc->name,
+	            mcp && mcp->user ? mcp->user : "(anonymous)");
 
 	payload = desc->handler(&ctx, args, &err);
 
@@ -590,7 +591,7 @@ serve(FCGX_Request *req)
 			return;
 		}
 
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": session %s deleted\n", mcp->id);
+		mcp_log_info("session %s deleted", mcp->id);
 		session_destroy(mcp);
 		FCGX_FPrintF(req->out, "Status: 204\r\n\r\n");
 		return;

@@ -324,11 +324,12 @@ agent to guess or work around a limitation.
 P3 — Logging and packaging
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Replace ``fprintf(stderr, ...)`` with elog: syslog, file and console
-   back ends, and the elog command-line parser.
-2. Honour the log level and backend selection once they are read from the
-   libconfig file (see P1), instead of being declared in ``config.in`` and
-   read by nobody.
+1. Integrate elog syslog, file and console back ends and its severity parser
+   on the command line. The implementation is in place; its Docker build has
+   not been verified yet.
+2. Apply the log level and backend selection from libconfig. The implementation
+   is in place; ``verbose`` selects debug severity unless ``--log-level`` is
+   given. Docker build verification is pending.
 3. Ship a systemd unit and an example lighttpd fragment.
 4. Revisit whether ``sr_module_install`` and ``sr_module_uninstall`` can be
    allowed for identities with the right NACM permissions instead of being

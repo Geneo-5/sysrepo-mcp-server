@@ -151,8 +151,8 @@ at compile time. Runtime configuration, namely the API keys, lives in the
 ``sysrepo-mcp`` YANG module (see :doc:`architecture`).
 
 In the generated header, every symbol is prefixed with ``CONFIG_``; for
-instance ``SYSREPO_MCP_SERVER_LOG_LEVEL`` is used from C as
-``CONFIG_SYSREPO_MCP_SERVER_LOG_LEVEL``.
+instance ``server.log.level`` is used from C as
+``CONFIG_server.log.level``.
 
 Sessions and notifications
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -294,20 +294,20 @@ Logging
    * - Option
      - Default
      - Description
-   * - ``SYSREPO_MCP_SERVER_SYSLOG_ENABLED``
-     - ``y``
+   * - ``server.log.syslog_enabled``
+     - ``true``
      - Log to syslog through elog.
-   * - ``SYSREPO_MCP_SERVER_LOG_FILE``
+   * - ``server.log.file``
      - ``/var/log/sysrepo-mcp.log``
-     - Log file, when syslog is disabled.
-   * - ``SYSREPO_MCP_SERVER_LOG_LEVEL``
+     - Append-only file log path; can be enabled together with syslog and console.
+   * - ``server.log.level``
      - ``6``
      - Syslog severity, 0 (emerg) to 7 (debug).
-   * - ``SYSREPO_MCP_SERVER_LOG_VERBOSE``
-     - ``n``
+   * - ``server.log.verbose``
+     - ``false``
      - Extra debugging output.
-   * - ``SYSREPO_MCP_SERVER_LOG_CONSOLE``
-     - ``y``
+   * - ``server.log.console``
+     - ``true``
      - Also log to ``stderr``.
 
 .. warning::
@@ -321,11 +321,13 @@ Usage
 
 .. code-block:: bash
 
-   sysrepo-mcp [--help] [--version]
+   sysrepo-mcp [--help] [--version] [-f <file>] [-l <severity>]
 
 ``--help`` prints a usage summary and exits, ``--version`` prints the version
-and exits. With no argument the process expects to be started as a FastCGI
-application by a web server and exits with an error otherwise.
+and exits. ``--log-level`` accepts elog severities ``emerg``, ``alert``,
+``crit``, ``err``, ``warn``, ``notice``, ``info`` or ``debug`` and overrides
+the libconfig threshold. With no argument the process expects to be started
+as a FastCGI application by a web server and exits with an error otherwise.
 
 See :doc:`architecture` for the reverse proxy configuration.
 
@@ -367,7 +369,7 @@ Dependencies
    * - **elog**
      - master
      - ``extern/``
-     - Logging (syslog, file, rotation)
+     - Logging (syslog and standard I/O; file output uses elog interface)
    * - **json-c**
      - Debian ``libjson-c-dev``
      - system package

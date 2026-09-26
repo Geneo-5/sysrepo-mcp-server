@@ -26,6 +26,7 @@
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/sessions.h>
 #include <sysrepo/mcp/libconfig.h>
+#include <sysrepo/mcp/log.h>
 
 /* --------------------------------------------------------------------- globals
  *
@@ -149,8 +150,7 @@ sessions_expire(void)
 		if (now - g_sessions[i].last_activity < mcp_config_get()->session_ttl)
 			continue;
 
-		fprintf(stderr, CONFIG_PACKAGE_NAME ": session %s expired\n",
-		        g_sessions[i].id);
+		mcp_log_info("session %s expired", g_sessions[i].id);
 		session_destroy(&g_sessions[i]);
 	}
 }
@@ -224,8 +224,7 @@ session_create(const char *user)
 			if (!sess->user) {
 				sess->in_use = 0;
 				g_session_count = 0; /* session_count hasn't been incremented yet, but g_session_count-- in destroy won't be called. */
-				fprintf(stderr, CONFIG_PACKAGE_NAME
-				        ": out of memory duplicating user name\n");
+				mcp_log_err("out of memory duplicating user name");
 				return NULL;
 			}
 		} else {
@@ -236,8 +235,7 @@ session_create(const char *user)
 			free(sess->user);
 			sess->in_use = 0;
 			g_session_count = 0; /* session_count hasn't been incremented yet, but g_session_count-- in destroy won't be called. */
-			fprintf(stderr, CONFIG_PACKAGE_NAME
-					": out of memory duplicating user name\n");
+			mcp_log_err("out of memory allocating notification queue");
 			return NULL;			
 		}
 		g_session_count++;
@@ -260,9 +258,8 @@ sessions_init(unsigned max_sessions)
 {
 	g_sessions = calloc(max_sessions, sizeof(*g_sessions));
 	if (!g_sessions) {
-		fprintf(stderr, CONFIG_PACKAGE_NAME
-		        ": cannot allocate %u sessions: %s\n",
-		        max_sessions, strerror(errno));
+		mcp_log_err("cannot allocate %u sessions: %s", max_sessions,
+		           strerror(errno));
 		return -1;
 	}
 
