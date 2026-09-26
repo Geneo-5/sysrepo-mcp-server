@@ -69,7 +69,7 @@ TEST_PORT = int(os.environ.get("SYSREPO_MCP_TEST_PORT", "80"))
 TEST_HOST = "127.0.0.1"
 
 MCP_ENDPOINT = "/mcp"
-MCP_PROTOCOL_VERSION = "2025-01-13"
+MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25"
 
 STARTUP_TIMEOUT = 20.0
 POLL_INTERVAL = 0.2
@@ -168,7 +168,7 @@ class McpClient:
         return self.rpc(
             "initialize",
             {
-                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "protocolVersion": MCP_LEGACY_PROTOCOL_VERSION,
                 "capabilities": {},
                 "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
             },
@@ -206,7 +206,7 @@ class McpClient:
             "id": 1,
             "method": "initialize",
             "params": {
-                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "protocolVersion": MCP_LEGACY_PROTOCOL_VERSION,
                 "capabilities": {},
                 "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
             },

@@ -14,10 +14,13 @@
 
 /* MCP Streamable HTTP transport constants. */
 
-/** MCP protocol version string (Streamable HTTP binding). */
+/** Current stateless MCP protocol version. */
 #ifndef MCP_PROTOCOL_VERSION
-#define MCP_PROTOCOL_VERSION "2025-01-13"
+#define MCP_PROTOCOL_VERSION "2026-07-28"
 #endif
+
+/** Newest handshake-based revision retained for backwards compatibility. */
+#define MCP_LEGACY_PROTOCOL_VERSION "2025-11-25"
 
 /** Maximum allowed request body size (1 MiB). */
 #ifndef MCP_MAX_BODY
@@ -49,7 +52,7 @@ void serve(FCGX_Request *req);
  */
 
 void dispatch(FCGX_Request *req, const char *body, size_t len,
-	      struct mcp_session *mcp, const char *user);
+	      struct mcp_session *mcp, const char *user, int modern);
 
 /* ------------------------------------------------------------------- stopping
  *

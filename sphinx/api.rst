@@ -40,9 +40,35 @@ convention.
 Lifecycle
 ~~~~~~~~~
 
-*Status: implemented.* An MCP client begins every connection with the
-handshake below, and a client that does not get an ``initialize`` result will
-not send any other method.
+*Status: implemented for two protocol eras.* Modern clients use the stateless
+``2026-07-28`` request format and can start with ``server/discover``. Legacy
+clients use the ``2025-11-25`` handshake described below.
+
+Modern request metadata
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Every modern POST carries the protocol version in both the HTTP header and
+the request's ``params._meta`` object, along with client identity and
+capabilities. The server requires ``Mcp-Method`` to match the JSON-RPC method.
+For ``tools/call``, ``Mcp-Name`` must match ``params.name``. For example::
+
+   POST /mcp
+   Content-Type: application/json
+   MCP-Protocol-Version: 2026-07-28
+   Mcp-Method: server/discover
+
+   {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{
+     "_meta":{
+       "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+       "io.modelcontextprotocol/clientInfo":{"name":"client","version":"1"},
+       "io.modelcontextprotocol/clientCapabilities":{}
+     }
+   }}
+
+Modern requests are independent; the server does not return
+``Mcp-Session-Id``. The session-bound notification subscription tools are
+available only through the legacy handshake. Requests with an ``Origin``
+header receive HTTP 403 by default.
 
 ``initialize``
 ^^^^^^^^^^^^^^
@@ -57,7 +83,7 @@ session**.
        "id": 1,
        "method": "initialize",
        "params": {
-           "protocolVersion": "2025-06-18",
+           "protocolVersion": "2025-11-25",
            "capabilities": {},
            "clientInfo": {
                "name": "example-agent",
@@ -75,7 +101,7 @@ exposes no resources, no prompts and no server-initiated messages.
        "jsonrpc": "2.0",
        "id": 1,
        "result": {
-           "protocolVersion": "2025-06-18",
+           "protocolVersion": "2025-11-25",
            "capabilities": {
                "tools": {
                    "listChanged": false
@@ -94,6 +120,16 @@ not in the JSON body::
    HTTP/1.1 200 OK
    Content-Type: application/json
    Mcp-Session-Id: 3f2a1c9e8b7d6540a1b2c3d4e5f60718
+
+The server also supports stateless MCP revision ``2026-07-28``. Modern
+clients send ``MCP-Protocol-Version`` and ``Mcp-Method`` headers and include
+``_meta.io.modelcontextprotocol/protocolVersion``, client identity and
+capabilities on every request. They can call ``server/discover`` to inspect
+the supported versions and capabilities. Modern requests are independent and
+do not receive an ``Mcp-Session-Id``. Legacy clients continue to use the
+``initialize`` handshake described above. For security, requests that include
+an ``Origin`` header are rejected with HTTP 403; browser-origin clients are
+not supported by the default configuration.
 
 .. note::
 

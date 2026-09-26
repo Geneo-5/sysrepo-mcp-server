@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from .conftest import MCP_PROTOCOL_VERSION
+from .conftest import MCP_LEGACY_PROTOCOL_VERSION
 
 # Every tool the server is expected to advertise.
 EXPECTED_TOOLS = {
@@ -49,17 +49,115 @@ def test_initialize_returns_a_protocol_version(mcp):
     result = mcp.result(
         "initialize",
         {
-            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "protocolVersion": MCP_LEGACY_PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
         },
     )
 
-    assert result["protocolVersion"] == MCP_PROTOCOL_VERSION
+    assert result["protocolVersion"] == MCP_LEGACY_PROTOCOL_VERSION
+
+
+def test_initialize_falls_back_to_the_supported_protocol_version(mcp):
+    result = mcp.result("initialize", {"protocolVersion": "2099-12-31"})
+
+    # The legacy handshake selects the only handshake revision supported.
+    assert result["protocolVersion"] == MCP_LEGACY_PROTOCOL_VERSION
+
+
+def modern_meta(version="2026-07-28"):
+    return {
+        "io.modelcontextprotocol/protocolVersion": version,
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "modern-test-client",
+            "version": "1",
+        },
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+
+
+def modern_request(mcp, method, params=None, version="2026-07-28",
+                   extra_headers=None):
+    params = dict(params or {})
+    params["_meta"] = modern_meta(version)
+    headers = {"MCP-Protocol-Version": version, "Mcp-Method": method}
+    if method == "tools/call" and "name" in params:
+        headers["Mcp-Name"] = params["name"]
+    if extra_headers:
+        headers.update(extra_headers)
+    body = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+        "params": params,
+    }).encode()
+    return mcp.request(body, extra_headers=headers)
+
+
+def test_modern_server_discovery(mcp):
+    response = modern_request(mcp, "server/discover")
+
+    assert response.status == 200
+    result = response.json()["result"]
+    assert result["resultType"] == "complete"
+    assert result["supportedVersions"] == ["2026-07-28", "2025-11-25"]
+    assert result["capabilities"]["tools"] == {}
+    assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "sysrepo-mcp"
+    assert "mcp-session-id" not in response.headers
+
+
+def test_modern_tools_list_is_complete_and_sessionless(mcp):
+    response = modern_request(mcp, "tools/list")
+
+    assert response.status == 200
+    result = response.json()["result"]
+    assert result["resultType"] == "complete"
+    names = {tool["name"] for tool in result["tools"]}
+    assert "sr_get_config" in names
+    assert "sr_notif_subscribe" not in names
+
+
+def test_modern_tools_call_works_without_a_protocol_session(mcp):
+    response = modern_request(
+        mcp, "tools/call", {"name": "get_status", "arguments": {}}
+    )
+
+    assert response.status == 200
+    result = response.json()["result"]
+    assert result["resultType"] == "complete"
+    assert isinstance(result["content"], list)
+    assert "mcp-session-id" not in response.headers
+
+
+def test_modern_protocol_header_mismatch_is_rejected(mcp):
+    response = modern_request(
+        mcp, "server/discover",
+        extra_headers={"MCP-Protocol-Version": "2025-11-25"},
+    )
+
+    assert response.status == 400
+    assert response.json()["error"]["code"] == -32020
+
+
+def test_modern_requests_with_origin_are_rejected_by_default(mcp):
+    response = modern_request(
+        mcp, "server/discover", extra_headers={"Origin": "https://example.test"}
+    )
+
+    assert response.status == 403
+
+
+def test_modern_unsupported_version_reports_supported_versions(mcp):
+    response = modern_request(mcp, "server/discover", version="2099-12-31")
+
+    assert response.status == 400
+    error = response.json()["error"]
+    assert error["code"] == -32022
+    assert error["data"]["supported"] == ["2026-07-28", "2025-11-25"]
 
 
 def test_initialize_announces_the_tool_capability(mcp):
-    result = mcp.result("initialize", {"protocolVersion": MCP_PROTOCOL_VERSION})
+    result = mcp.result("initialize", {"protocolVersion": MCP_LEGACY_PROTOCOL_VERSION})
 
     assert "tools" in result["capabilities"]
 
@@ -71,7 +169,7 @@ def test_initialize_announces_the_tool_capability(mcp):
 
 
 def test_initialize_identifies_the_server(mcp):
-    result = mcp.result("initialize", {"protocolVersion": MCP_PROTOCOL_VERSION})
+    result = mcp.result("initialize", {"protocolVersion": MCP_LEGACY_PROTOCOL_VERSION})
     info = result["serverInfo"]
 
     assert info["name"] == "sysrepo-mcp"
@@ -85,7 +183,7 @@ def test_initialized_notification_is_accepted(mcp):
 
 
 def test_full_handshake(mcp):
-    mcp.result("initialize", {"protocolVersion": MCP_PROTOCOL_VERSION})
+    mcp.result("initialize", {"protocolVersion": MCP_LEGACY_PROTOCOL_VERSION})
     assert mcp.rpc("notifications/initialized", req_id=None).status == 202
 
     # After the handshake the catalogue must be reachable.
@@ -239,7 +337,7 @@ def test_get_status_reports_the_expected_fields(mcp):
 
 
 def test_get_status_version_matches_the_server_info(mcp):
-    initialize = mcp.result("initialize", {"protocolVersion": MCP_PROTOCOL_VERSION})
+    initialize = mcp.result("initialize", {"protocolVersion": MCP_LEGACY_PROTOCOL_VERSION})
     status = mcp.tool("get_status", {})
 
     assert status["version"] == initialize["serverInfo"]["version"]

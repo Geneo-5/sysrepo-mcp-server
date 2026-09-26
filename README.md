@@ -185,12 +185,14 @@ in front for HTTP clients. Lighttpd and standalone systemd examples are in
 ```sh
 # 1. Open a session: the identifier comes back in the header
 curl -i -X POST http://localhost/mcp \
+     -H 'Accept: application/json, text/event-stream' \
      -H 'Content-Type: application/json' \
      -d '{"jsonrpc":"2.0","id":1,"method":"initialize",
-          "params":{"protocolVersion":"2025-06-18"}}'
+          "params":{"protocolVersion":"2025-11-25"}}'
 
 # 2. Subscribe to notifications, repeating the header
 curl -X POST http://localhost/mcp \
+     -H 'Accept: application/json, text/event-stream' \
      -H 'Content-Type: application/json' \
      -H 'Mcp-Session-Id: <identifier>' \
      -d '{"jsonrpc":"2.0","id":2,"method":"tools/call",
@@ -199,6 +201,7 @@ curl -X POST http://localhost/mcp \
 
 # 3. Collect what arrived since the last call
 curl -X POST http://localhost/mcp \
+     -H 'Accept: application/json, text/event-stream' \
      -H 'Content-Type: application/json' \
      -H 'Mcp-Session-Id: <identifier>' \
      -d '{"jsonrpc":"2.0","id":3,"method":"tools/call",

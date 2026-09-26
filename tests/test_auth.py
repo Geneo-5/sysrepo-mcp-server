@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import pytest
 
-from .conftest import MCP_PROTOCOL_VERSION, McpClient
+from .conftest import MCP_LEGACY_PROTOCOL_VERSION, McpClient
 
 # -----------------------------------------------------------------------
 # JSON-RPC error codes (the JSON-RPC 2.0 specification)
@@ -194,7 +194,7 @@ def test_session_reuse_preserves_user(mcp_auth: McpClient) -> None:
         "id": 1,
         "method": "initialize",
         "params": {
-            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "protocolVersion": MCP_LEGACY_PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "sysrepo-mcp-tests", "version": "1.0.0"},
         },

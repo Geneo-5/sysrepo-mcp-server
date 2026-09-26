@@ -62,7 +62,7 @@ def _request(sock: socket.socket) -> dict:
         "id": 1,
         "method": "initialize",
         "params": {
-            "protocolVersion": "2025-01-13",
+            "protocolVersion": "2025-11-25",
             "capabilities": {},
             "clientInfo": {"name": "standalone-test", "version": "1"},
         },
@@ -178,7 +178,7 @@ def test_standalone_fastcgi_listener(mode: str, tmp_path: Path) -> None:
         if payload is None:
             output = proc.stdout.read().decode(errors="replace") if proc.poll() is not None else ""
             pytest.fail(f"standalone {mode} listener did not answer: {last_error}\n{output}")
-        assert payload["result"]["protocolVersion"] == "2025-01-13"
+        assert payload["result"]["protocolVersion"] == "2025-11-25"
         assert payload["result"]["serverInfo"]["name"] == "sysrepo-mcp"
     finally:
         proc.terminate()

@@ -129,6 +129,15 @@ contains plugin-management resources. Record runtime findings after that
 connection is available to the agent; do not infer live behavior from the
 local test fixtures.
 
+**MCP 2026-07-28 support is in progress.** The stateless request path,
+``server/discover``, per-request metadata/header checks, and modern
+``tools/list``/``tools/call`` results are implemented alongside legacy
+``2025-11-25`` handshake support. Session-bound notification subscription
+tools are omitted from modern ``tools/list``. Modern requests with an
+``Origin`` header are rejected by default because no browser-origin allow-list
+is configured. The modern test cases still need a passing Docker run before
+this implementation can be called verified.
+
 P0 — Security (blocks any untrusted deployment)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -351,9 +360,10 @@ P4 — Tests to complete
    code will break first.
 2. Run the server under valgrind; the JSON reference counting and the
    notification queue deserve it.
-3. ~~Exercise notification replay, which needs replay support enabled on a
-   module.~~ The test enables replay on ``oven``, emits an event before
-   subscribing, then verifies the historical event and replay completion.
+3. Exercise notification replay, which needs replay support enabled on a
+   module. A test now enables replay on ``oven``, emits an event before
+   subscribing, then verifies the historical event and replay completion;
+   run it in Docker before marking this item done.
 4. ~~Exercise queue overflow and the ``dropped`` counter.~~ The test sends
    ten notifications into an eight-entry test queue, verifies that two were
    dropped and drains the eight most recent entries.

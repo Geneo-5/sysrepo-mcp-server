@@ -36,7 +36,7 @@ Résumé au moment de la rédaction. Le détail est dans `sphinx/todo.rst`.
 | Documentation Sphinx | fonctionnelle, `-W` propre |
 | Suite de tests | 260+ tests via lighttpd sur le port 80 |
 | Transport FastCGI, JSON-RPC, codes HTTP | fonctionnel |
-| Cycle de vie MCP (`initialize`, `tools/list`, enveloppe `content`) | fonctionnel |
+| Cycle de vie MCP (`2026-07-28` stateless + handshake `2025-11-25`) | en cours de validation |
 | Sessions (`Mcp-Session-Id`, TTL, `DELETE`) | fonctionnel, **local au processus** |
 | Outils datastore, RPC, actions | fonctionnels |
 | Notifications (abonnement, file, `sr_notif_poll`) | fonctionnel |
