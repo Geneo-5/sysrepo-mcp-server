@@ -215,7 +215,8 @@ const struct tool_desc tools[] = {
 	/* Schema introspection */
 	{
 		"get_schema",
-		"Explore compiled YANG schema, optionally from one XPath.",
+		"Explore compiled YANG schema. Start without xpath and with "
+		"max_depth=1 to discover exact paths, then inspect a subtree.",
 		"{\"type\":\"object\",\"properties\":{"
 		"\"xpath\":{\"type\":\"string\"},"
 		"\"max_depth\":{\"type\":\"integer\",\"minimum\":0,"

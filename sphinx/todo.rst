@@ -33,13 +33,13 @@ Done
 - Session allocation no longer statically sized (``CONFIG_SYSREPO_MCP_SERVER_MAX_SESSIONS``
   gone); ``sessions_init()`` allocates dynamically from the config value.
 - Sphinx documentation: installation, architecture, API reference, license.
-- Test suite: 260-odd tests over HTTP through lighttpd, against the upstream
-  oven plugin.
+- Test suite: 259 tests verified in Docker over HTTP through lighttpd, including
+  the upstream oven plugin.
 - FastCGI transport, JSON-RPC framing and the HTTP status contract.
 - Runtime transport modes: proxy-provided FastCGI descriptor, standalone
   FastCGI listener on a Unix socket or numeric IPv4 address/port.
-- MCP lifecycle: ``initialize``, ``notifications/initialized``,
-  ``tools/list``, ``ping``, and the ``content`` result envelope.
+- MCP protocol: legacy ``2025-11-25`` sessions and stateless
+  ``2026-07-28`` discovery, tool listing/calls, metadata, and cache fields.
 - Sessions: ``Mcp-Session-Id``, idle expiry, maximum count, ``DELETE``.
 - Datastore tools: ``sr_get_config``, ``sr_edit_config``,
   ``sr_delete_config``, ``sr_copy_config``, ``sr_get_operational``.
@@ -62,360 +62,108 @@ Done
 Priority backlog
 -----------------
 
-Everything still to do, across the whole project (milestones, agent-usage
-gaps, tests, future work), gathered here in a single ordered list. Each item
-below used to live in its own section; those sections now only record
-context and decisions, not open work — see the cross-references.
+Only unfinished work appears here, ordered by impact. Completed milestone
+checklists were removed from this section; their delivered behavior is listed
+under *Done* above and documented in the corresponding API/architecture pages.
 
-Running several agent sessions concurrently against one server is not a
-goal here — see *Not planned* below — so nothing in this backlog is about
-lifting ``max-procs = 1``.
+P0 — Security and fail-closed startup
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Findings from this review (not yet triaged into a priority)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. **Make API-key lookup constant-time.** ``mcp_config_find_key()`` currently
+   compares every byte up to the longer input, so runtime still depends on
+   key length. Use a fixed maximum key length and scan the full configured
+   credential set without returning early on a byte or key match. Include
+   length mismatch in the accumulated result. Reject configured keys beyond
+   the maximum. Add tests for a valid key, a same-prefix wrong key, shorter
+   and longer keys, and matches at the first and last configured entries.
+   Do not hash keys: the user explicitly rejected SHA-256 as unnecessary CPU
+   cost. Keys therefore remain plaintext in the config file and process
+   memory; require high-entropy values, restrictive config-file permissions,
+   and never log credentials.
 
-- ``config.in``'s top-of-file comment ("Configuration options that affect
-  runtime behavior are in ``yang/sysrepo-mcp.yang``") referred to the module
-  P1.1 removed. Fixed: both occurrences now point at the libconfig file.
-- ``README.md``'s "État du projet" callout still listed authentication and
-  NACM as missing, which contradicted both this page (P0 marked done) and
-  ``sphinx/architecture.rst`` ("fully enforced"). P0.10 is now resolved, so
-  this has been settled: ``README.md``, ``AGENTS.md`` and ``sphinx/api.rst``
-  updated to match the code.
-- **P0.3 ("Store keys hashed") was falsely marked done.** ``load_auth()`` in
-  ``src/libconfig.c`` copies each key from the libconfig file into
-  ``struct mcp_api_key.key``; ``mcp_config_find_key()`` compares that
-  plaintext value with the presented credential. The comparison processes
-  every byte (including length differences), but this does not protect
-  credentials at rest or in process memory. Reopened below: store a
-  one-way digest and compare digests in constant time. This requires a
-  documented configuration transition for existing plaintext keys.
-- ``sphinx/api.rst``'s error-code documentation (implementation-defined
-  range and the sysrepo mapping table) did not match
-  ``include/sysrepo/mcp/utilities.h`` at all — the codes were entirely
-  transposed. Fixed. One remaining gap surfaced while fixing it: a missing
-  or unknown API key is reported as ``-32603`` (Internal error) with HTTP
-  401, in both ``method_initialize()`` and ``serve()`` in ``transport.c``.
-  ``-32603`` is meant for unexpected server-side failure, not a client
-  authentication problem; ``-32007`` is unused and would be a natural home
-  for it, but this needs an explicit decision (and a test) before changing
-  the wire contract.
-- ``sphinx/architecture.rst``'s authentication description now correctly
-  says keys are plaintext in the config file and process memory, but it still
-  says this roadmap marks hashing as done. Update that cross-reference when
-  closing P0.3.
+2. **Fail closed on invalid configuration.** ``main()`` currently warns when
+   ``mcp_config_load()`` fails and continues with defaults; this can disable
+   configured authentication after a syntax or validation error. Exit before
+   opening sysrepo or a listener on parse/validation errors. Preserve built-in
+   defaults only for the documented case where the default config file is
+   absent, and test both cases.
 
-**Test regressions from the previous development run are resolved.** The
-NACM fixture now installs ``oven``, ``sr_get_config`` preserves the previous
-default-leaf output when ``options`` is omitted, and the malformed
-``sr_get_config`` input-schema JSON was corrected. The full Docker suite
-passed after the MCP 2026-07-28 changes: 258 passed, 0 failed. Run it again
-after subsequent code changes.
+P1 — Interoperability and deployment verification
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Live oven audit not yet performed.** The user reports adding a sysrepo-mcp
-connection, but this Codex session exposes no sysrepo-mcp tool or resource:
-the callable tool list has no sysrepo entry, and the MCP resource list only
-contains plugin-management resources. Record runtime findings after that
-connection is available to the agent; do not infer live behavior from the
-local test fixtures.
+1. **Make schema discovery progressive for agents without source YANG.**
+   Field feedback reports that a full ``get_schema(xpath="/")`` response is
+   about 72 KB and that guessing ``/oven`` or the YANG prefix path
+   ``/ov:oven`` fails. The current API already supports the solution: start
+   with ``max_depth: 1``, read the exact node ``xpath`` returned, then drill
+   into that subtree. The YANG prefix is metadata; the XPath first segment
+   uses the module name (for the local fixture, module ``oven``, prefix
+   ``ov``, path ``/oven:oven``). This flow is now documented and covered by
+   ``test_schema_can_be_explored_progressively_without_source``. Improve
+   invalid-path feedback to point to discovered root paths or this workflow,
+   and confirm it works with an agent using only MCP tools.
 
-**MCP 2026-07-28 support is implemented and covered by the Docker suite.**
-The stateless request path,
-``server/discover``, per-request metadata/header checks, and modern
-``tools/list``/``tools/call`` results are implemented alongside legacy
-``2025-11-25`` handshake support. Session-bound notification subscription
-tools are omitted from modern ``tools/list``. Modern requests with an
-``Origin`` header are rejected by default because no browser-origin allow-list
-is configured, so browser clients require a future explicit allow-list
-configuration. The full suite passed with this behavior in place.
+2. **Verify the live MCP connector after deployment.** The connector reported
+   that ``tools/list`` rejected missing ``ttlMs`` and ``cacheScope``. The
+   server now includes both fields (``ttlMs: 0``, ``cacheScope: "private"``)
+   in modern ``tools/list`` and ``server/discover`` responses; the full Docker
+   suite passes (259 passed, 0 failed). Restart/redeploy the updated responder
+   and confirm the connector can fetch and invoke a read-only tool. This
+   session currently cannot call the connection's tools, so live acceptance
+   remains unverified.
 
-**Live MCP connection reports ``tools/list`` schema rejection.** The user
-reports the connector rejects missing ``ttlMs`` and ``cacheScope``. This
-matches the 2026-07-28 result schema: both fields are required on
-``tools/list`` and ``server/discover``. Added ``ttlMs: 0`` and
-``cacheScope: "private"`` to both modern responses and regression tests;
-the full Docker suite passes (258 passed, 0 failed). The updated responder
-must still be deployed/restarted and retried in the live connector; this
-session has not been given callable ``sysrepo-mcp`` tools to check that final
-runtime step.
+3. **Correct the authentication error code.** A missing or invalid API key
+   returns HTTP 401 with JSON-RPC ``-32603`` (Internal error). Choose the
+   documented authentication/authorization code, update both initialization
+   and stateless request paths, and align tests and :doc:`api`. Do not leave a
+   client authentication failure classified as an internal server fault.
 
-P0 — Security (blocks any untrusted deployment)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+P2 — Protocol and agent capabilities
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. warning::
+1. **Modern notification subscriptions.** ``2026-07-28`` tool listings omit
+   the session-bound subscribe/unsubscribe/list/poll tools, so these remain
+   available only to legacy ``2025-11-25`` clients. Define a stateless
+   subscription identity/lifecycle compatible with the modern protocol, or
+   explicitly retain this as a documented legacy-only capability with an
+   interoperability test.
+2. **Trusted browser clients.** Requests with ``Origin`` are rejected by
+   default. If browser clients are required, add an explicit origin allow-list
+   in runtime configuration, validate it before processing requests, and test
+   allowed, rejected, and absent origins. Keep the default deny behavior.
+3. **Implement ``sr_diff_config``.** Compare two conventional datastores and
+   return the documented flat ``diff`` array. Read both trees with
+   ``sr_get_data()`` and compute changes with ``lyd_diff_siblings()``.
 
-   Until this is complete, an agent has every right of the system user
-   running the server. The build must not be exposed to an untrusted agent,
-   and the documentation must keep saying so. This is the single most
-   critical risk in the project today, ahead of scaling.
+   a. Build ``diff_to_json()`` using the XPath construction logic shared with
+      ``tree_to_json()``.
+   b. Decide and document whether depth limits apply during reads or after
+      diffing; the current API description assumes the former, which can hide
+      changes below the cutoff.
+   c. Include ``previous_position`` for moved entries in user-ordered lists
+      and leaf-lists using libyang's ``yang:key``/``yang:value``/
+      ``yang:position`` metadata.
+   d. Reject identical source and target datastores with ``-32602``.
+   e. Test changed leaves, added/removed/reordered list entries, and no-op
+      results.
 
-1. ~~Extract the credential from ``HTTP_AUTHORIZATION`` or a cookie, per
-   ``SYSREPO_MCP_SERVER_AUTH_BEARER`` / ``SYSREPO_MCP_SERVER_AUTH_COOKIE``
-   and ``SYSREPO_MCP_SERVER_COOKIE_NAME`` in the libconfig file (see P1).~~
-2. ~~Look the key up in the API-key list of the libconfig configuration file
-   (see P1) and resolve the NACM user — no longer ``/sysrepo-mcp:api-key``
-   in the datastore.~~
-3. **Reopened: keys are not hashed.** Store a one-way digest instead of the
-   plaintext credential and compare digests in constant time. Define and
-   document how ``api_keys[].key`` is configured (for example, explicit
-   digest field with a versioned algorithm), migrate examples and fixtures,
-   and test both accepted and rejected credentials. Do not claim protection
-   against a weak source key: API keys must have sufficient entropy.
-4. ~~``sr_nacm_init()`` at startup, ``sr_nacm_set_user()`` per request,
-   ``sr_nacm_check_operation()`` before an RPC, ``sr_nacm_destroy()`` at exit
-   — gated by ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``.~~
-5. ~~Apply the module allow-list (``SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES``,
-   gated by ``SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER``), the operation
-   filter (``SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER``) and the
-   write protection (``SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION``)
-   from the libconfig file before calling sysrepo — all under the master
-   ``SYSREPO_MCP_SERVER_ACL_ENABLED`` switch (see P1).~~
-6. ~~Bind the identity to the session, so a subscription cannot outlive the
-   rights that created it.~~
-7. ~~Deny ``sr_module_install`` and ``sr_module_uninstall`` by default. They
-   change the schema of the whole datastore for every process linked against
-   sysrepo, and removing a module destroys its data. (Revisit once
-   authentication exists — see P3.4.)~~
-8. ~~Log every configuration change with the identity that caused it.~~
-9. ~~Cover authentication and NACM with tests once they exist. Until then
-   there is nothing to assert beyond "everything is permitted", which is
-   exactly the state the tests must not enshrine.~~
-10. ~~Reopened by this review. ``sr_nacm_check_operation()`` is not
-    called anywhere in the source tree. ``sr_nacm_set_user()`` is set on
-    the session (item 6), so sysrepo's own data-level enforcement covers
-    ``sr_get_config``/``sr_edit_config``/``sr_delete_config``, but
-    ``rpc_common()`` in ``rpc.c`` sends the operation straight to
-    ``sr_rpc_send_tree()`` with no explicit authorization check first —
-    the code says so itself, in the comment above the call in
-    ``method_tools_call()`` (``transport.c``): "deferred to a follow-up
-    commit". Until this lands, an authenticated but unprivileged agent can
-    invoke any RPC or action of any installed module. Add the missing
-    ``sr_nacm_check_operation()`` call in ``rpc_common()`` before
-    ``sr_rpc_send_tree()``, and a test asserting a NACM-denied user gets
-    ``-32003`` on an RPC it may not call. Item 4 above should not be read
-    as covering this case.~~ (Done: ``sr_nacm_init()`` au démarrage dans
-    ``sysrepo_open()``, ``sr_nacm_check_operation()`` dans
-    ``rpc_common()`` avant ``sr_rpc_send_tree()``,
-    ``sr_nacm_destroy()`` à l'arrêt dans ``sysrepo_close()``,
-    test ``test_nacm_denied_rpc()``.)
+P3 — Verification and release quality
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-P1 — Configuration: drop the YANG module, adopt libconfig
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. Add CI coverage for a matrix of supported libyang/sysrepo revisions. They
+   are pinned together; introspection is the first area likely to break when
+   either revision changes.
+2. Run the server and exercised tests under Valgrind, focusing on JSON
+   reference ownership and notification queue lifetimes.
 
-Installing this MCP server should not itself install a YANG module or
-otherwise change what the sysrepo instance offers. Runtime configuration
-(API keys, session limits, logging) belongs in a config file read once at
-process startup, not in the datastore.
+P4 — Optional future capabilities
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. ~~Remove ``yang/sysrepo-mcp.yang`` entirely; the server no longer installs
-   any YANG module of its own into sysrepo.~~ (Done: ``yang/`` no longer
-   contains ``sysrepo-mcp.yang``.)
+1. Transactions spanning several tool calls, with explicit commit and rollback.
+2. Metrics export.
 
-2. ~~Introduce a libconfig-based configuration file, parsed once at startup,
-   carrying every setting that is a runtime concern rather than a
-   build-time toggle.~~ (Done: ``src/libconfig.c`` + ``src/config.c`` parse
-   ``docker/sysrepo-mcp.conf``, parsed by ``main.c`` at startup.)
-
-3. Everything else in ``config.in`` — paths, feature toggles compiled in —
-   stays build-time Kconfig; the split is settled by the list above, so
-   this is no longer an open question.
-4. Update ``sysrepo_open/close`` in ``config.c`` to parse the libconfig
-   file instead of reading sysrepo-mcp's own datastore subtree for this
-   data. (Done: ``src/config.c`` calls ``mcp_config_load()`` and
-   ``mcp_config_set()``.)
-5. ~~Rework the P0 authentication design accordingly: the API key list and
-   the hashed comparison move to the config file; only
-   ``sr_nacm_set_user()`` and the NACM check still go through sysrepo
-   (NACM itself is sysrepo's own mechanism, not this project's YANG
-   module).~~ (Done: all P0 items completed, ``docker/sysrepo-mcp.conf``
-   provides the API key list at runtime.)
-6. ~~Rewrite ``tests/test_errors.py``'s list, key-predicate and empty-match
-   coverage against a different fixture module, since it currently relies
-   on the project's own YANG module for cases the oven model doesn't have.~~
-   (Done: ``docker/sysrepo-mcp.conf`` provides a test fixture with no API
-   keys, which is the expected test state.)
-7. ~~Update the docs and ``docker/Dockerfile``: nothing under ``yang/`` to
-   install for this project's own schema; ``sr_module_install`` stays only
-   for modules the deployment itself chooses to manage (still denied by
-   default, see P0.7).~~ (Done: ``docker/sysrepo-mcp.conf`` in place, default
-   config falls back to built-in values when the file is absent.)
-8. Remove session limits, transport, authentication, access control, logging
-   entries from ``config.in`` Kconfig (``MAX_SESSIONS``, ``SESSION_TTL``,
-   ``NOTIF_QUEUE_SIZE``, ``DEFAULT_TIMEOUT_MS``, ``MAX_TREE_DEPTH`` moved to
-   runtime only). (Done: ``mcp_config_set_defaults()`` provides the same
-   defaults.)
-
-P2 — Agent-usability gaps
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Smaller than a milestone individually, but each one currently forces an
-agent to guess or work around a limitation.
-
-1. ~~**Merge get_tree and get_help into one xpath/depth-driven tool.**~~
-   The former ``get_tree`` and ``get_help`` tools have been replaced by
-   ``get_schema``, which shares the optional ``xpath`` and ``max_depth`` arguments:
-
-   - ``xpath`` (string, optional). Starting point of the walk. Omitted or
-     ``"/"`` means the datastore root — every implemented module, not just
-     one. ``module`` is dropped as a separate argument.
-   - ``max_depth`` (integer, optional, default ``0``). ``0`` means
-     unlimited recursion from ``xpath``; a positive value stops N levels
-     below the start node. The existing build-time
-     ``mcp_config_get()->max_tree_depth`` stays as a hard safety ceiling:
-     effective depth is ``max_depth == 0 ? config limit : min(max_depth,
-     config limit)``, so a caller cannot force unbounded recursion on a
-     pathological schema.
-
-   Completed sub-tasks:
-
-   a. ~~Factor recursion into a depth-aware node walker and per-node
-      callback.~~
-   b. ~~Put the full XPath on every recursive node and drop the duplicate
-      flat ``nodes`` array.~~
-   c. ~~``get_tree``: extend the per-node JSON towards a transcription of
-      ``LYS_OUT_TREE`` (the shape ``yanglint -f tree`` prints). In addition
-      to the existing ``type``/``config``, add ``mandatory``, cardinality
-      for lists and leaf-lists (``min-elements``/``max-elements``), the key
-      list of a list, whether a container is ``presence``, choice/case
-      grouping, and whether the node comes from an ``augment``. This is new
-      information, not a reshuffle of what ``get_help`` already computes.~~
-      Implemented in the current tree output.
-   d. ~~``get_help`` → ``get_schema``: move ``add_leaf_help()`` and
-      ``res_add_range()`` (already correct for leaf/leaf-list) into the
-      shared walker so every visited node — not only the one named by
-      ``xpath`` — carries its full compiled detail: the JSON equivalent of
-      ``LYS_OUT_YANG_COMPILED``. While doing this, generalize the
-      ``must``/``when`` extraction, which today only runs for
-      ``LYS_LEAF``/``LYS_LEAFLIST`` even though ``lysc_node_container``,
-      ``lysc_node_list``, and RPC/action input/output nodes carry their own
-      ``musts``/``when`` too — the comment already sitting in
-      ``tool_get_help()`` right after the leaf block ("Must and when
-      assertions on the node itself") signals this was the intent, never
-      finished.
-   e. ~~Rename ``tool_get_help`` to ``tool_get_schema`` throughout:
-      ``schema.c``, ``schema.h``, the ``tools[]`` entry in ``main.c``,
-      ``sphinx/api.rst``, ``README.md``, ``tests/test_schema.py``. No
-      backward-compatible alias: the server has no stable client base yet,
-      and the new contract subsumes the old single-node one (``max_depth``
-      omitted with an ``xpath`` naming a leaf behaves like today's
-      ``get_help``).~~
-   f. ~~Decide, and record here, what happens when ``xpath`` is omitted on a
-      context with many large modules: cap the number of top-level modules
-      walked per call, require at least one of ``xpath``/a still-supported
-      module filter, or accept a possibly large response and rely on
-      ``max_depth`` to bound it. Decision: accept the full response; the
-      configured hard depth ceiling bounds recursion, and clients can pass
-      an XPath when they need a narrower result.
-   g. ~~Rewrite ``tests/test_schema.py`` for the merged contract: default
-      (whole datastore) call, ``max_depth`` of 0/1/2 on a known module,
-      xpath inline on nested nodes, non-leaf nodes reporting ``must``/
-      ``when`` once (d) lands.
-   h. ~~Update ``sphinx/api.rst`` (arguments, result shape, worked example)
-      and the tool-status table in ``sphinx/architecture.rst``.~~
-
-2. ~~**RPC input introspection**, folded into 1.d above: once ``get_schema``
-   recurses into RPC/action ``input``/``output`` nodes, ``time`` in
-   ``insert-food`` stops being reported as ``unknown`` on its own, without a
-   separate ``get_input_schema`` tool.~~
-3. ~~**No feedback after write.**~~ ``sr_edit_config`` now reports
-   ``edit_nodes``: the number of explicit schema nodes in the accepted edit
-   tree, including structural containers. This confirms the submitted edit
-   size, not the datastore diff: repeated values still count, and removals
-   caused by ``replace`` are not included. Exact before/after change reporting
-   remains the scope of the planned ``sr_diff_config`` tool (P5.2).
-4. ~~**Missing ``copy-config``.**~~ ``sr_copy_config`` takes required
-   ``source`` and ``destination`` conventional datastore names, rejects a
-   same-datastore request, and delegates the full replacement to sysrepo
-   ``sr_copy_config()``. It intentionally has no per-module filter.
-5. ~~**Default values: selectable output.**~~ The call chain is
-   ``sr_get_config`` → ``sr_get_data()`` (without ``LYD_OPT_DEFAULT``) →
-   ``tree_to_json()`` → ``lyd_print_mem()``. ``sr_get_config`` accepts an
-   ``options`` string list: ``trim-defaults`` or ``all-defaults``. Omitting
-   the list preserves the prior libyang output. These choices control
-   printing of defaults in the returned tree; they do not request that
-   sysrepo materialize implicit defaults absent from that tree.
-6. ~~``sr_list_modules`` does not report enabled features.~~ The tool now
-   includes enabled feature names for implemented modules and an empty list
-   otherwise.
-
-P3 — Logging and packaging
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-1. Integrate elog syslog, file and console back ends and its severity parser
-   on the command line. Done and compiled in Docker.
-2. Apply the log level and backend selection from libconfig. The implementation
-   is in place; ``verbose`` selects debug severity unless ``--log-level`` is
-   given. Done and compiled in Docker.
-3. ~~Ship systemd units and example proxy configuration.~~ Both supported
-   deployment shapes are covered: lighttpd can spawn the responder through
-   ``bin-path``, or systemd can start it directly with a Unix socket. A TCP
-   listener is available for FastCGI-capable proxies such as nginx.
-4. ~~Revisit whether ``sr_module_install`` and ``sr_module_uninstall`` can be
-   allowed for identities with the right NACM permissions instead of being
-   denied outright.~~ Keep denying both tools whenever API-key authentication
-   is enabled. They are MCP tools rather than YANG RPCs/actions, so sysrepo's
-   NACM operation rules do not provide a permission to check. Without API-key
-   authentication they run with the FastCGI process's operating-system
-   privileges.
-
-P4 — Tests to complete
-~~~~~~~~~~~~~~~~~~~~~~
-
-1. Run the suite in CI against a matrix of libyang and sysrepo revisions;
-   the two are pinned together and bumping them is where the introspection
-   code will break first.
-2. Run the server under valgrind; the JSON reference counting and the
-   notification queue deserve it.
-3. ~~Exercise notification replay, which needs replay support enabled on a
-   module. A test now enables replay on ``oven``, emits an event before
-   subscribing, then verifies the historical event and replay completion;
-   run it in Docker before marking this item done.~~ The full Docker suite
-   passed with the replay test enabled (258 passed, 0 failed).
-4. ~~Exercise queue overflow and the ``dropped`` counter.~~ The test sends
-   ten notifications into an eight-entry test queue, verifies that two were
-   dropped and drains the eight most recent entries.
-5. ~~Cover ``sr_module_install`` and ``sr_module_uninstall`` beyond argument
-   validation.~~ A round-trip test installs a temporary YANG module into the
-   suite's private repository, lists it, uninstalls it and verifies cleanup.
-   The server must not retain a connection-level libyang context while these
-   operations run: that read lock prevents sysrepo from updating the schema.
-
-P5 — Later / future features
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-No immediate blocker, but worth keeping on the radar.
-
-1. Transactions spanning several tool calls, with explicit commit and
-   rollback.
-2. **A diff tool between two datastores.** Specified in
-   :doc:`api`, ``sr_diff_config``: ``source``/``target`` datastore,
-   ``xpath`` (default the datastore root) and ``max_depth`` (default 0 =
-   unlimited), reading both sides with ``sr_get_data()`` and diffing them
-   with libyang's ``lyd_diff_siblings()``. Implementation sub-tasks:
-
-   a. A ``diff_to_json()`` helper turning a ``struct lyd_node`` diff tree
-      into the flat ``diff`` array the spec describes — reusing
-      ``tree_to_json()``'s xpath-building logic rather than duplicating it.
-   b. Decide how ``max_depth`` interacts with reading each side: apply it to
-      the two ``sr_get_data()`` calls before diffing (cheaper, but a node
-      only different below the cutoff is invisible), or diff first and
-      truncate the reported paths afterwards (correct, more expensive). The
-      spec currently assumes the former; revisit if it proves misleading in
-      practice.
-   c. Surface libyang's ``yang:key``/``yang:value``/``yang:position``
-      diff metadata for moved entries in user-ordered lists and leaf-lists,
-      as ``previous_position`` — the one part of the diff format not a
-      straight transcription of ``lyd_diff_siblings()``'s own output.
-   d. Reject ``source == target`` with ``-32602`` rather than returning an
-      empty diff, since it is almost certainly a mistake.
-   e. Tests: a leaf changed, a list entry added/removed/reordered, and the
-      no-op case (empty ``diff``, ``changed: 0``).
-3. Metrics export.
-
-.. note::
-
-   **Not** on this list: OAuth2/JWT authentication, and a dedicated dry-run
-   mode. See *Not planned* below for why.
+Not planned: OAuth2/JWT, a dedicated dry-run tool, SSE, WebSocket, or a direct
+HTTP listener. See *Not planned* below for the recorded decisions.
 
 Environment d'agent
 -------------------
@@ -423,8 +171,7 @@ Environment d'agent
 Bilan tiré de l'utilisation pratique du serveur sysrepo-mcp comme environnement
 d'exécution d'outils. Objectif : identifier ce qui rend cet environnement
 rapide et facile à utiliser. Les points d'amélioration identifiés ici sont
-suivis dans le *Priority backlog* ci-dessus (P0 pour l'authentification, P2
-pour les manques d'ergonomie agent, P3 pour le logging).
+suivis dans le *Priority backlog* ci-dessus, regroupés par urgence et impact.
 
 Points positifs
 ~~~~~~~~~~~~~~~
@@ -479,8 +226,8 @@ build used to get wrong.
 - ``.github/workflows/c-cpp.yml``: the script path was wrong, and the workflow
   had never run to completion.
 - ``libconfig-dev`` and the stale ``docker/config.cfg`` were dropped: the
-  project did not use libconfig at the time. (This is being reversed — see
-  *P1 — Configuration* in the Priority backlog.)
+  project did not use libconfig at the time. Runtime configuration now uses
+  libconfig; only build-time toggles remain in Kconfig.
 - ``config.in`` Kconfig entries for session limits, transport, authentication,
   access control, and logging moved to runtime; only build-time toggles
   (session ID length) remain in Kconfig.  Removed
@@ -625,9 +372,9 @@ Decisions already taken, recorded here so they are not re-litigated:
 **A dedicated dry-run tool**
    sysrepo itself has no dry-run operation to wrap. Writing to ``candidate``,
    validating it, and comparing it against ``running`` already gets an agent
-   most of the way there — see ``sr_diff_config`` in :doc:`api` (P5) once it
-   exists, and the missing ``copy-config`` tool (P2.4) to promote a validated
-   ``candidate`` afterwards. A separate dry-run tool would only be
+   most of the way there — see ``sr_diff_config`` in :doc:`api` (P2) once it
+   exists. ``sr_copy_config`` can promote a validated ``candidate``. A
+   separate dry-run tool would only be
    reconsidered if that combination proves insufficient in practice.
 
 Contributing

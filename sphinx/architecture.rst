@@ -254,7 +254,7 @@ the proxy forwards it as the ``HTTP_AUTHORIZATION`` FastCGI parameter.
    ``transport.c``).
 2. It looks the key up in the libconfig ``server.auth.api_keys[]`` list
    (``mcp_config_find_key()``) — no longer ``/sysrepo-mcp:api-key`` in the
-   datastore; that YANG module was removed (see :doc:`todo`, P1).
+   datastore; that YANG module was removed (see :doc:`install`).
 3. It resolves the associated NACM user name.
 4. It calls ``sr_nacm_set_user()`` on the sysrepo session, so every subsequent
    operation is evaluated against that user's NACM rules.
@@ -265,11 +265,12 @@ the proxy forwards it as the ``HTTP_AUTHORIZATION`` FastCGI parameter.
    API keys are held in cleartext, both in the libconfig file on disk and in
    the server's memory (``struct mcp_api_key.key`` in
    ``include/sysrepo/mcp/libconfig.h``) — anyone who can read that file or
-   attach to the process can read every key. The comparison in
-   ``mcp_config_find_key()`` is byte-by-byte over the full key length, which
-   resists a timing attack, but that is not the same as hashing at rest.
-   ``sphinx/todo.rst`` tracks hashing as an open P0.3 item. Do not expose
-   this deployment to an untrusted agent until that item is complete.
+   attach to the process can read every key. The current comparison in
+   ``mcp_config_find_key()`` scans to the longer key length, so timing still
+   varies with key length. A fixed-length constant-time check is open under
+   P0 in ``sphinx/todo.rst``. Use high-entropy keys and restrict access to
+   the config file; do not expose this deployment to an untrusted agent
+   until the P0 items are complete.
 
 Cookie
 ~~~~~~

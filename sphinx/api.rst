@@ -664,7 +664,7 @@ See :doc:`todo`, P5, for the planning note.
 
    ``xpath`` (string)
       Full path of the node, exactly as ``get_schema``
-      report it (see :doc:`todo`, P2.1).
+      reports it.
 
    ``operation`` (string)
       ``created``, ``deleted``, ``replaced`` or ``moved`` — libyang's
@@ -734,7 +734,7 @@ See :doc:`todo`, P5, for the planning note.
    between the two reads can produce a diff that never existed as one
    consistent snapshot. Acceptable for an agent comparing ``running``
    against a ``candidate`` it just finished editing itself; not a substitute
-   for a real transaction (see :doc:`todo`, P5).
+   for a real transaction (see :doc:`todo`, P4).
 
 Operational data
 ----------------
@@ -1342,14 +1342,20 @@ omitted path.
 **Arguments**
 
 ``xpath`` (string, optional)
-   Absolute schema XPath, including the module prefix on its first segment.
-   For example, ``/oven:oven/temperature``. Omit it or pass ``/`` to inspect
-   all implemented modules.
+   Absolute schema XPath. Use the module **name** on its first segment, not
+   the YANG ``prefix`` statement. For the example ``oven`` module,
+   ``sr_list_modules`` reports name ``oven`` and YANG prefix ``ov``; the
+   schema path is ``/oven:oven/temperature``. Omit ``xpath`` or pass ``/`` to
+   inspect every implemented module.
 
 ``max_depth`` (integer, optional, default 0)
    Number of child levels to include below the selected node. Zero traverses
    to the configured hard schema-depth limit; positive values are capped by
-   that same limit.
+   that same limit. For progressive exploration without a source YANG file,
+   first call ``get_schema`` with ``max_depth: 1`` and no ``xpath``. Read a
+   returned node's full ``xpath`` and pass it back to inspect that subtree at
+   greater depth. This avoids the much larger unlimited response and avoids
+   guessing a root path.
 
 **Result**
 
@@ -1483,9 +1489,8 @@ The implementation-defined range, ``-32000`` to ``-32099``, as defined in
    table: it currently reuses ``-32603`` (Internal error) with the message
    "Unauthorized" and HTTP 401 (``method_initialize()`` and ``serve()`` in
    ``transport.c``). This conflates a client-caused condition with the code
-   meant for unexpected server-side failure; it has not been reassigned to
-   ``-32007`` yet, tracked as a *Findings from this review* item in
-   :doc:`todo`.
+   meant for unexpected server-side failure; choosing and documenting a
+   replacement is tracked as P1.2 in :doc:`todo`.
 
 .. note::
 

@@ -8,13 +8,12 @@ actions, and explore YANG schemas.
 > **Project status.** The server is functional: FastCGI transport, the MCP
 > lifecycle, sessions (`Mcp-Session-Id`), configuration tools, RPC, actions,
 > notifications, module management and schema introspection. Authentication
-> (API keys from the libconfig file, compared byte-by-byte to resist timing
-> attacks — **not currently hashed at rest**, see `sphinx/todo.rst` findings)
-> and NACM are wired in and enforced on every operation, including RPCs and
-> actions; key hashing remains open under P0.3 in `sphinx/todo.rst`
-> (`sr_nacm_check_operation()` in `rpc_common()`). The rest of P0 is
-> implemented. Logging uses elog with configurable syslog, file and console
-> back ends. The shared session store is still absent (`max-procs` must stay
+> (API keys from the libconfig file, plaintext at rest and in process memory)
+> and NACM are enforced on every operation, including RPCs and actions.
+> Constant-time API-key comparison and fail-closed handling of invalid
+> configuration remain open under P0 in `sphinx/todo.rst`. Logging uses elog
+> with configurable syslog, file and console back ends. The shared session
+> store is still absent (`max-procs` must stay
 > 1). The detailed roadmap, which is authoritative on the real state of the
 > code, is in
 > [`sphinx/todo.rst`](sphinx/todo.rst).
@@ -261,7 +260,7 @@ license, roadmap.
 - **No direct HTTP listener.** HTTP, TLS and rate limiting stay the
   responsibility of the reverse proxy; standalone sockets carry FastCGI.
 - **RPC/action authorization.** See the project status above and
-  `sphinx/todo.rst`, P0.10.
+  `sphinx/todo.rst`, the completed security work and remaining P0 items.
 
 ## License
 

@@ -20,6 +20,22 @@ def test_schema_without_xpath_enumerates_implemented_modules(mcp_oven):
     assert "nodes" in result["modules"]["oven"]
 
 
+def test_schema_can_be_explored_progressively_without_source(mcp_oven):
+    index = schema(mcp_oven, max_depth=1)
+    module = index["modules"]["oven"]
+    root = module["nodes"]["oven"]
+
+    # YANG declares prefix "ov", but the first XPath segment uses the
+    # module name returned by sr_list_modules.
+    assert module["prefix"] == "ov"
+    assert root["xpath"] == "/oven:oven"
+
+    subtree = schema(mcp_oven, xpath=root["xpath"], max_depth=1)
+    oven = subtree["modules"]["oven"]["nodes"]["oven"]
+    assert oven["children"]["temperature"]["xpath"] == \
+        "/oven:oven/temperature"
+
+
 def test_schema_nodes_include_inline_paths_and_compiled_details(mcp_oven):
     result = schema(mcp_oven, xpath="/oven:oven")
     oven = result["modules"]["oven"]["nodes"]["oven"]
