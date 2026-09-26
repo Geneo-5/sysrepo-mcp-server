@@ -653,7 +653,6 @@ def _load_nacm_config(env: dict[str, str]) -> None:
                 "-l", tmp_path,
                 "-d", "running",
                 "-m", "ietf-netconf-acm",
-                "-o",  # overwrite: replaces current running config
             ],
             env=env,
             capture_output=True,
