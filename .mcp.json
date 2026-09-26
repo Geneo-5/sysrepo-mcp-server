@@ -2,7 +2,7 @@
   "mcpServers": {
     "sysrepo-mcp": {
       "type": "http",
-      "url": "http://localhost:8080/mcp"
+      "url": "http://localhost/mcp"
     }
   }
 }

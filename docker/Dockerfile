@@ -81,6 +81,7 @@ RUN apt-get update && \
         python3-pytest \
         # HTTP server running in the background
         lighttpd \
+        lighttpd-mod-openssl \
         # Debugging / inspection
         strace \
         gdb \

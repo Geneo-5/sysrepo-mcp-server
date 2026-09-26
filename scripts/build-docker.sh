@@ -221,7 +221,8 @@ fi
 if [ "$RUN" -eq 1 ]; then
     log_info "Running service..."
     docker run --rm -it \
-        -p 8080:8080 \
+        -p 80:80 \
+        -p 443:443 \
         -v "${PROJECT_DIR}:${PROJECT_DIR}" \
         -w "${PROJECT_DIR}" \
         "${DOCKER_IMAGE}:${DOCKER_TAG}" \
