@@ -399,6 +399,29 @@ def test_counters_are_reported(oven_session):
     assert result["dropped"] == 0
 
 
+def test_queue_overflow_keeps_recent_notifications_and_counts_drops(
+    oven_session,
+):
+    oven_session.tool("sr_notif_subscribe", {"module": "oven"})
+
+    for _ in range(10):
+        oven_session.tool("sr_notif_send", {"xpath": OVEN_READY})
+
+    result = wait_for(
+        lambda: (lambda batch: batch if batch["pending"] == 8 else None)(
+            oven_session.tool("sr_notif_poll", {"peek": True})
+        )
+    )
+
+    assert result["total_received"] == 10
+    assert result["dropped"] == 2
+
+    drained = oven_session.tool("sr_notif_poll", {})
+    assert len(drained["notifications"]) == 8
+    assert drained["pending"] == 0
+    assert drained["dropped"] == 2
+
+
 def test_subscription_counter_tracks_what_it_received(oven_session):
     oven_session.tool("sr_notif_subscribe", {"module": "oven"})
     oven_session.tool("sr_notif_send", {"xpath": OVEN_READY})

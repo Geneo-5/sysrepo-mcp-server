@@ -15,7 +15,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
 #include <getopt.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 #include <json-c/json.h>
 
@@ -34,7 +40,6 @@
 #include <sysrepo/mcp/notifications.h>
 #include <sysrepo/mcp/schema.h>
 #include <sysrepo/mcp/status.h>
-#include <sysrepo/mcp/log.h>
 #include <sysrepo/mcp/log.h>
 
 /* --------------------------------------------------------------------- globals
@@ -242,6 +247,33 @@ on_signal(int signum)
 	FCGX_ShutdownPending();
 }
 
+static int
+open_tcp_listener(const char *host, int port, int backlog)
+{
+	struct sockaddr_in address;
+	int fd;
+
+	fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (fd < 0)
+		return -1;
+	memset(&address, 0, sizeof(address));
+	address.sin_family = AF_INET;
+	address.sin_port = htons((uint16_t)port);
+	if (inet_pton(AF_INET, host, &address.sin_addr) != 1) {
+		close(fd);
+		errno = EINVAL;
+		return -1;
+	}
+	if (bind(fd, (struct sockaddr *)&address, sizeof(address)) ||
+	    listen(fd, backlog)) {
+		int saved_errno = errno;
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	return fd;
+}
+
 static void
 usage(FILE *out)
 {
@@ -260,9 +292,10 @@ usage(FILE *out)
 		"  --help      print this message and exit\n"
 		"  --version   print the version and exit\n"
 		"\n"
-		"With no argument, " CONFIG_PACKAGE_NAME " expects to be started as a\n"
-		"FastCGI application by a web server. Sessions are held in this\n"
-		"process, so the FastCGI configuration must use max-procs = 1.\n");
+		"server.transport.mode selects proxy (default), unix, or tcp. In\n"
+		"proxy mode a web server starts this FastCGI responder; unix and tcp\n"
+		"modes create a listening socket directly. Sessions are process-local,\n"
+		"so run one process per datastore.\n");
 }
 
 /* ---------------------------------------------------------------- sysrepo_open/close
@@ -322,7 +355,11 @@ main(int argc, char *argv[])
 {
 	FCGX_Request     req;
 	struct sigaction sa;
+	const struct mcp_config *runtime_cfg;
 	const char       *config_path = "/etc/sysrepo-mcp/sysrepo-mcp.conf";
+	char             listener[160];
+	int              listener_fd = 0;
+	int              standalone;
 	int              opt;
 	static struct option long_options[] = {
 		{"config", required_argument, NULL, 'f'},
@@ -398,6 +435,8 @@ main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 	mcp_config_free(&cfg);
+	runtime_cfg = mcp_config_get();
+	standalone = runtime_cfg->transport_mode != MCP_TRANSPORT_PROXY;
 
 	if (FCGX_Init()) {
 		mcp_log_err("FCGX_Init failed");
@@ -410,9 +449,9 @@ main(int argc, char *argv[])
 	 * under FastCGI the request parameters arrive per request in
 	 * req.envp, never in the process environment.
 	 */
-	if (FCGX_IsCGI()) {
+	if (!standalone && FCGX_IsCGI()) {
 		mcp_log_err("not started as a FastCGI application; run behind a "
-		            "reverse proxy or use --help");
+		            "reverse proxy, or configure a unix/tcp listener");
 		mcp_log_close();
 		return EXIT_FAILURE;
 	}
@@ -440,8 +479,70 @@ main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	if (FCGX_InitRequest(&req, 0, 0)) {
+	if (runtime_cfg->transport_mode == MCP_TRANSPORT_UNIX) {
+		struct stat st;
+
+		if (!lstat(runtime_cfg->unix_socket_path, &st)) {
+			if (!S_ISSOCK(st.st_mode) || unlink(runtime_cfg->unix_socket_path)) {
+				mcp_log_err("refusing to replace non-socket path or remove "
+				            "existing socket %s: %s",
+				            runtime_cfg->unix_socket_path, strerror(errno));
+				sessions_free();
+				sysrepo_close();
+				mcp_log_close();
+				return EXIT_FAILURE;
+			}
+		} else if (errno != ENOENT) {
+			mcp_log_err("cannot inspect socket path %s: %s",
+			            runtime_cfg->unix_socket_path, strerror(errno));
+			sessions_free();
+			sysrepo_close();
+			mcp_log_close();
+			return EXIT_FAILURE;
+		}
+		snprintf(listener, sizeof(listener), "%s", runtime_cfg->unix_socket_path);
+	}
+	if (standalone) {
+		if (runtime_cfg->transport_mode == MCP_TRANSPORT_UNIX)
+			listener_fd = FCGX_OpenSocket(listener, 128);
+		else
+			listener_fd = open_tcp_listener(runtime_cfg->tcp_host,
+			                                runtime_cfg->tcp_port, 128);
+		if (listener_fd < 0) {
+			if (runtime_cfg->transport_mode == MCP_TRANSPORT_UNIX)
+				mcp_log_err("cannot open FastCGI listener %s: %s", listener,
+				            strerror(errno));
+			else
+				mcp_log_err("cannot open FastCGI listener %s:%d: %s",
+				            runtime_cfg->tcp_host, runtime_cfg->tcp_port,
+				            strerror(errno));
+			if (runtime_cfg->transport_mode == MCP_TRANSPORT_UNIX)
+				unlink(runtime_cfg->unix_socket_path);
+			sessions_free();
+			sysrepo_close();
+			mcp_log_close();
+			return EXIT_FAILURE;
+		}
+		if (runtime_cfg->transport_mode == MCP_TRANSPORT_UNIX &&
+		    chmod(runtime_cfg->unix_socket_path, 0660)) {
+			mcp_log_err("cannot set permissions on %s: %s",
+			            runtime_cfg->unix_socket_path, strerror(errno));
+			close(listener_fd);
+			unlink(runtime_cfg->unix_socket_path);
+			sessions_free();
+			sysrepo_close();
+			mcp_log_close();
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (FCGX_InitRequest(&req, listener_fd, 0)) {
 		mcp_log_err("FCGX_InitRequest failed");
+		if (standalone) {
+			close(listener_fd);
+			if (runtime_cfg->transport_mode == MCP_TRANSPORT_UNIX)
+				unlink(runtime_cfg->unix_socket_path);
+		}
 		sysrepo_close();
 		mcp_log_close();
 		return EXIT_FAILURE;
@@ -457,6 +558,11 @@ main(int argc, char *argv[])
 	sessions_free();
 
 	FCGX_Free(&req, 1);
+	if (standalone) {
+		close(listener_fd);
+		if (runtime_cfg->transport_mode == MCP_TRANSPORT_UNIX)
+			unlink(runtime_cfg->unix_socket_path);
+	}
 	sysrepo_close();
 
 	mcp_log_info("stopped");

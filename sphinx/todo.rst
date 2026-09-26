@@ -36,6 +36,8 @@ Done
 - Test suite: 260-odd tests over HTTP through lighttpd, against the upstream
   oven plugin.
 - FastCGI transport, JSON-RPC framing and the HTTP status contract.
+- Runtime transport modes: proxy-provided FastCGI descriptor, standalone
+  FastCGI listener on a Unix socket or numeric IPv4 address/port.
 - MCP lifecycle: ``initialize``, ``notifications/initialized``,
   ``tools/list``, ``ping``, and the ``content`` result envelope.
 - Sessions: ``Mcp-Session-Id``, idle expiry, maximum count, ``DELETE``.
@@ -329,12 +331,10 @@ P3 — Logging and packaging
 2. Apply the log level and backend selection from libconfig. The implementation
    is in place; ``verbose`` selects debug severity unless ``--log-level`` is
    given. Done and compiled in Docker.
-3. ~~Ship a systemd unit and an example lighttpd fragment.~~ The sample
-   unit runs lighttpd, which spawns the MCP responder through ``bin-path``.
-   Directly starting the responder is not supported: ``FCGX_InitRequest()``
-   uses descriptor 0 and the code has no ``FCGX_OpenSocket()`` path. Remove
-   the old architecture claim that transport settings create a listener; an
-   nginx-to-standalone-responder deployment remains future work.
+3. ~~Ship systemd units and example proxy configuration.~~ Both supported
+   deployment shapes are covered: lighttpd can spawn the responder through
+   ``bin-path``, or systemd can start it directly with a Unix socket. A TCP
+   listener is available for FastCGI-capable proxies such as nginx.
 4. ~~Revisit whether ``sr_module_install`` and ``sr_module_uninstall`` can be
    allowed for identities with the right NACM permissions instead of being
    denied outright.~~ Keep denying both tools whenever API-key authentication
@@ -353,7 +353,9 @@ P4 — Tests to complete
    notification queue deserve it.
 3. Exercise notification replay, which needs replay support enabled on a
    module.
-4. Exercise queue overflow and the ``dropped`` counter.
+4. ~~Exercise queue overflow and the ``dropped`` counter.~~ The test sends
+   ten notifications into an eight-entry test queue, verifies that two were
+   dropped and drains the eight most recent entries.
 5. ~~Cover ``sr_module_install`` and ``sr_module_uninstall`` beyond argument
    validation.~~ A round-trip test installs a temporary YANG module into the
    suite's private repository, lists it, uninstalls it and verifies cleanup.
@@ -391,9 +393,6 @@ No immediate blocker, but worth keeping on the radar.
    e. Tests: a leaf changed, a list entry added/removed/reordered, and the
       no-op case (empty ``diff``, ``changed: 0``).
 3. Metrics export.
-4. Add a standalone FastCGI listener for externally started deployments.
-   The current responder only accepts the proxy-spawned descriptor-0 socket;
-   nginx and systemd socket activation need an ``FCGX_OpenSocket()`` path.
 
 .. note::
 

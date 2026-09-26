@@ -327,22 +327,38 @@ replacement for NACM rules.
 FastCGI transport
 -----------------
 
-The server currently runs as a proxy-spawned FastCGI responder. Lighttpd's
-``bin-path`` starts the process and passes its listening socket on descriptor
-0; ``max-procs`` must be 1 because sessions and notification queues are local
-to the process. The application does not create a FastCGI listening socket
-itself. An externally started responder
-(for example behind nginx) is not supported yet.
+The server supports three FastCGI listener modes, selected with
+``server.transport.mode`` in the libconfig file:
+
+``proxy``
+   The default. Lighttpd's ``bin-path`` starts the process and passes its
+   listening socket on descriptor 0.
+
+``unix``
+   The process creates a Unix domain socket at
+   ``server.transport.unix_socket_path`` and sets its permissions to
+   ``0660``. Its parent directory must already exist and be writable by the
+   service account.
+
+``tcp``
+   The process listens on ``server.transport.tcp_host`` and
+   ``server.transport.tcp_port``. The host must be a numeric IPv4 address;
+   the default is ``127.0.0.1:8080``.
+
+Sessions and notification queues are local to the process. Run one server
+process per repository. The socket carries FastCGI, not HTTP; put a FastCGI
+capable reverse proxy in front of it for HTTP clients and terminate TLS at a
+trusted proxy.
 
 lighttpd
 ~~~~~~~~
 
-A complete lighttpd configuration and a systemd unit that supervises it are
-provided in ``contrib/lighttpd/sysrepo-mcp.conf`` and
-``contrib/systemd/sysrepo-mcp-lighttpd.service``. The listener is bound to
-loopback; terminate TLS at a trusted reverse proxy. The FastCGI socket is
-created under ``/run/sysrepo-mcp`` and must remain private to the service and
-proxy accounts.
+A complete lighttpd configuration and a unit that supervises it are provided
+in ``contrib/lighttpd/sysrepo-mcp.conf`` and
+``contrib/systemd/sysrepo-mcp-lighttpd.service``. A standalone TCP
+configuration and systemd unit are in ``contrib/sysrepo-mcp-standalone.conf``
+and ``contrib/systemd/sysrepo-mcp-standalone.service``. The examples bind to
+loopback; terminate TLS at a trusted reverse proxy.
 
 sysrepo usage
 -------------

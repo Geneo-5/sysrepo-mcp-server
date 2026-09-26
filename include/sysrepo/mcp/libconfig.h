@@ -41,6 +41,12 @@ struct mcp_api_key {
 	char *user;	/* NACM user name to run the session as */
 };
 
+enum mcp_transport_mode {
+	MCP_TRANSPORT_PROXY = 0,
+	MCP_TRANSPORT_UNIX,
+	MCP_TRANSPORT_TCP,
+};
+
 /* -------------------------------------------------------------------- mcp_config
  */
 
@@ -60,6 +66,10 @@ struct mcp_config {
 
 	/* schema introspection */
 	unsigned max_tree_depth;	/* server.session.max_tree_depth */
+	enum mcp_transport_mode transport_mode;	/* server.transport.mode */
+	char unix_socket_path[108];	/* server.transport.unix_socket_path */
+	char tcp_host[64];		/* server.transport.tcp_host */
+	int tcp_port;			/* server.transport.tcp_port */
 
 	/* server.auth: "none", "bearer" or "cookie".  When "none" (the
 	 * default) no authentication is performed.  NACM is implicit

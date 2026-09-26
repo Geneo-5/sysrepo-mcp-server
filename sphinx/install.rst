@@ -195,6 +195,24 @@ Session and schema settings
 The session store is process-local, so the lighttpd configuration must use
 ``max-procs = 1``.
 
+FastCGI listener
+~~~~~~~~~~~~~~~~
+
+``server.transport.mode`` is a string with three choices: ``proxy`` (the
+default), ``unix`` or ``tcp``. In ``proxy`` mode lighttpd starts the responder
+and passes its listener on descriptor 0. In ``unix`` mode the program creates
+``server.transport.unix_socket_path`` (default
+``/run/sysrepo-mcp/mcp.sock``) and sets permissions to ``0660``. In ``tcp``
+mode it listens on ``server.transport.tcp_host`` (default ``127.0.0.1``) and
+``server.transport.tcp_port`` (default ``8080``). TCP hosts must be numeric
+IPv4 addresses. The parent directory for a Unix socket must already exist.
+
+Use one server process per sysrepo repository. These sockets carry FastCGI,
+not HTTP. For remote clients, put a FastCGI capable reverse proxy in front and
+terminate TLS there. Example standalone config and systemd unit:
+``contrib/sysrepo-mcp-standalone.conf`` and
+``contrib/systemd/sysrepo-mcp-standalone.service``.
+
 Authentication
 ~~~~~~~~~~~~~
 
@@ -239,12 +257,9 @@ syslog or a writable file path for persistent application logs.
 FastCGI transport
 ~~~~~~~~~~~~~~~~~
 
-The application currently relies on lighttpd spawning it with ``bin-path``
-and passing the listener on descriptor 0. Set ``max-procs`` to 1. A complete
-configuration is provided at ``contrib/lighttpd/sysrepo-mcp.conf``; the
-matching systemd unit starts lighttpd as the supervisor. There is no
-standalone Unix or TCP listener in the current implementation, so the
-transport socket fields formerly shown here did not have an effect.
+For proxy-spawned operation, use ``contrib/lighttpd/sysrepo-mcp.conf`` and
+``contrib/systemd/sysrepo-mcp-lighttpd.service``. The application can also
+create a Unix or TCP listener itself; see the listener settings above.
 
 Usage
 -----
@@ -256,8 +271,9 @@ Usage
 ``--help`` prints a usage summary and exits, ``--version`` prints the version
 and exits. ``--log-level`` accepts elog severities ``emerg``, ``alert``,
 ``crit``, ``err``, ``warn``, ``notice``, ``info`` or ``debug`` and overrides
-the libconfig threshold. With no argument the process expects to be started
-as a FastCGI application by a web server and exits with an error otherwise.
+the libconfig threshold. With the default ``proxy`` listener mode the process
+expects to be started as a FastCGI application by a web server. Select
+``unix`` or ``tcp`` in the runtime config to create a listener itself.
 
 See :doc:`architecture` for the FastCGI deployment model. A lighttpd
 configuration and matching systemd unit are included under ``contrib/``. The

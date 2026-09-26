@@ -72,9 +72,9 @@ actions, and explore YANG schemas.
 
 Two decisions shape everything else:
 
-- **FastCGI transport only.** The server never speaks HTTP itself: a reverse
-  proxy terminates HTTP and TLS and forwards to it over FastCGI. No public
-  socket, no SSE (see *Limitations*).
+- **FastCGI transport only.** The server never speaks HTTP itself. It can be
+  spawned by lighttpd or create a Unix/TCP FastCGI listener; a reverse proxy
+  terminates HTTP and TLS. No public HTTP listener, no SSE (see *Limitations*).
 - **sysrepo as a library.** `libsysrepo` is linked into the binary and
   called directly. There is no daemon: sysrepo has had none since version 2.
 
@@ -154,10 +154,9 @@ scripts/build-docker.sh --force      # re-download extern/ and rebuild the image
 sysrepo-mcp [--help] [--version] [-f <file>] [-l <severity>]
 ```
 
-With no argument, the process waits to be started as a FastCGI application
-by a web server, reading its runtime configuration from
-`/etc/sysrepo-mcp/sysrepo-mcp.conf` by default. Example lighttpd
-configuration:
+The runtime configuration defaults to `/etc/sysrepo-mcp/sysrepo-mcp.conf`.
+`server.transport.mode` selects `proxy` (default), `unix`, or `tcp`. In
+`proxy` mode, lighttpd starts the FastCGI process:
 
 ```
 server.modules += ( "mod_fastcgi" )
@@ -174,9 +173,12 @@ fastcgi.server = (
 )
 ```
 
-For a service-managed deployment, see the lighttpd and systemd examples in
-[`contrib/`](contrib/). They keep the responder proxy-spawned, as required by
-the current FastCGI implementation.
+For standalone operation, select `unix` or `tcp`; the program creates the
+FastCGI listener itself. The sample config uses a Unix socket at
+`/run/sysrepo-mcp/mcp.sock`; the TCP mode defaults to `127.0.0.1:8080`.
+These sockets carry FastCGI, not HTTP. Place a FastCGI-capable reverse proxy
+in front for HTTP clients. Lighttpd and standalone systemd examples are in
+[`contrib/`](contrib/).
 
 ### Example session
 
@@ -252,8 +254,8 @@ license, roadmap.
   sampling and elicitation are out of scope for the same reason.
 - **`max-procs = 1`.** Sessions are local to the process; see the roadmap,
   milestone 4.
-- **No direct transport.** HTTP, TLS and rate limiting stay the
-  responsibility of the reverse proxy.
+- **No direct HTTP listener.** HTTP, TLS and rate limiting stay the
+  responsibility of the reverse proxy; standalone sockets carry FastCGI.
 - **RPC/action authorization.** See the project status above and
   `sphinx/todo.rst`, P0.10.
 

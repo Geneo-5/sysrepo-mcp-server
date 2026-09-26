@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #include <libconfig.h>
 
@@ -41,6 +42,8 @@
 #define MCP_RANGE_MAX_TREE_DEPTH_MAX     256
 #define MCP_RANGE_LOG_LEVEL_MIN          0
 #define MCP_RANGE_LOG_LEVEL_MAX          7
+#define MCP_RANGE_TCP_PORT_MIN           1
+#define MCP_RANGE_TCP_PORT_MAX           65535
 
 /* ------------------------------------------------------------------------ xstrdup
  *
@@ -130,6 +133,11 @@ mcp_config_set_defaults(struct mcp_config *cfg)
 	cfg->notif_queue_size  = 256;
 	cfg->default_timeout_ms = 5000;
 	cfg->max_tree_depth    = 32;
+	cfg->transport_mode    = MCP_TRANSPORT_PROXY;
+	copy_string(cfg->unix_socket_path, sizeof(cfg->unix_socket_path),
+	            "/run/sysrepo-mcp/mcp.sock");
+	copy_string(cfg->tcp_host, sizeof(cfg->tcp_host), "127.0.0.1");
+	cfg->tcp_port = 8080;
 
 	/* auth_method: 0 = "none" (no authentication), 1 = "bearer",
 	 * 2 = "cookie".  Default is "none" so that a file that sets
@@ -181,6 +189,58 @@ load_session(config_t *cc, struct mcp_config *cfg)
 		                     60000))
 			return -1;
 		cfg->default_timeout_ms = (unsigned)v;
+	}
+	return 0;
+}
+
+/* ---------------------------------------------------------------- load_transport
+ */
+
+static int
+load_transport(config_t *cc, struct mcp_config *cfg)
+{
+	const char *mode;
+	const char *str;
+	struct in_addr address;
+	int port;
+
+	if (config_lookup_string(cc, "server.transport.mode", &mode)) {
+		if (!strcmp(mode, "proxy"))
+			cfg->transport_mode = MCP_TRANSPORT_PROXY;
+		else if (!strcmp(mode, "unix"))
+			cfg->transport_mode = MCP_TRANSPORT_UNIX;
+		else if (!strcmp(mode, "tcp"))
+			cfg->transport_mode = MCP_TRANSPORT_TCP;
+		else {
+			mcp_log_err("libconfig: server.transport.mode must be "
+			            "\"proxy\", \"unix\" or \"tcp\", got \"%s\"",
+			            mode);
+			return -1;
+		}
+	}
+	if (config_lookup_string(cc, "server.transport.unix_socket_path", &str)) {
+		if (!*str || strlen(str) >= sizeof(cfg->unix_socket_path)) {
+			mcp_log_err("libconfig: server.transport.unix_socket_path must "
+			            "contain 1 to %zu bytes",
+			            sizeof(cfg->unix_socket_path) - 1);
+			return -1;
+		}
+		copy_string(cfg->unix_socket_path, sizeof(cfg->unix_socket_path), str);
+	}
+	if (config_lookup_string(cc, "server.transport.tcp_host", &str)) {
+		if (inet_pton(AF_INET, str, &address) != 1) {
+			mcp_log_err("libconfig: server.transport.tcp_host must be an "
+			            "IPv4 address");
+			return -1;
+		}
+		copy_string(cfg->tcp_host, sizeof(cfg->tcp_host), str);
+	}
+	if (config_lookup_int(cc, "server.transport.tcp_port", &port)) {
+		if (check_range_uint("server.transport.tcp_port", port,
+		                     MCP_RANGE_TCP_PORT_MIN,
+		                     MCP_RANGE_TCP_PORT_MAX))
+			return -1;
+		cfg->tcp_port = port;
 	}
 	return 0;
 }
@@ -310,6 +370,8 @@ mcp_config_load(const char *path, struct mcp_config *cfg)
 	rc = load_session(&cc, cfg);
 	if (rc == 0)
 		rc = load_schema(&cc, cfg);
+	if (rc == 0)
+		rc = load_transport(&cc, cfg);
 	if (rc == 0)
 		rc = load_auth(&cc, cfg);
 	if (rc == 0)

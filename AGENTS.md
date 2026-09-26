@@ -149,6 +149,10 @@ Le code se trompait sur ces points ; ne pas les réintroduire.
 - **Détecter l'environnement avec `FCGX_IsCGI()`.** Les paramètres de requête
   arrivent dans `request.envp`, pas dans l'environnement du processus : tester
   `getenv("REQUEST_METHOD")` ne marche pas.
+- **Le mode de socket est explicite.** `server.transport.mode = "proxy"`
+  conserve le descripteur 0 fourni par lighttpd; `"unix"` et `"tcp"` créent
+  un listener FastCGI avec `FCGX_OpenSocket()`. TCP doit rester derrière un
+  proxy de confiance; le serveur ne parle pas HTTP ni TLS.
 - **`stdout` appartient au corps de la réponse**, `stderr` est capturé par le
   proxy. Le seul journal fiable est syslog.
 - **Toujours répondre.** Corps vide, JSON invalide, méthode inconnue : il faut
