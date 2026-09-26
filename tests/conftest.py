@@ -464,6 +464,266 @@ def _install_module(env: dict[str, str], name: str, path: Path,
     return ModuleInstall(name, path, True, proc.returncode == 0, output)
 
 
+# -----------------------------------------------------------------------
+# NACM configuration loading (auth tests prerequisite)
+# -----------------------------------------------------------------------
+
+_IETF_NACM_YANG = (
+    Path(__file__).resolve().parent.parent
+    / "extern" / "sysrepo" / "modules" / "ietf-netconf-acm@2018-02-14.yang"
+)
+
+_NACM_XML = r"""
+<nacm xmlns="urn:ietf:params:xml:ns:yang:ietf-netconf-acm">
+  <exec-default>deny</exec-default>
+  <enable-external-groups>false</enable-external-groups>
+  <groups>
+    <group>
+      <name>admins</name>
+      <user-name>admin</user-name>
+    </group>
+    <group>
+      <name>operators</name>
+      <user-name>operator</user-name>
+    </group>
+    <group>
+      <name>viewers</name>
+      <user-name>viewer</user-name>
+    </group>
+  </groups>
+  <rule-list>
+    <name>sysrepo-mcp-admin</name>
+    <group>admins</group>
+    <rule>
+      <name>sysrepo-mcp-all</name>
+      <module-name>sysrepo-mcp</module-name>
+      <access-operations>*</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>oven-all</name>
+      <module-name>oven</module-name>
+      <access-operations>*</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>acm-all</name>
+      <module-name>ietf-netconf-acm</module-name>
+      <access-operations>*</access-operations>
+      <action>permit</action>
+    </rule>
+  </rule-list>
+  <rule-list>
+    <name>sysrepo-mcp-operator</name>
+    <group>operators</group>
+    <rule>
+      <name>sysrepo-mcp-read</name>
+      <module-name>sysrepo-mcp</module-name>
+      <access-operations>read</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>sysrepo-mcp-api-key-write</name>
+      <module-name>sysrepo-mcp</module-name>
+      <path>/sysrepo-mcp:sysrepo-mcp-test/api-key</path>
+      <access-operations>create update delete</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>sysrepo-mcp-server-state</name>
+      <module-name>sysrepo-mcp</module-name>
+      <path>/sysrepo-mcp:sysrepo-mcp-test/server-state</path>
+      <access-operations>read</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>sysrepo-mcp-status</name>
+      <module-name>sysrepo-mcp</module-name>
+      <rpc-name>get_status</rpc-name>
+      <access-operations>exec</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>sysrepo-mcp-notif-subscribe</name>
+      <module-name>sysrepo-mcp</module-name>
+      <rpc-name>sr_notif_subscribe</rpc-name>
+      <access-operations>exec</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>oven-read</name>
+      <module-name>oven</module-name>
+      <access-operations>read</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>oven-insert-food</name>
+      <module-name>oven</module-name>
+      <rpc-name>insert-food</rpc-name>
+      <access-operations>exec</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>sysrepo-mcp-test-read</name>
+      <module-name>sysrepo-mcp-test</module-name>
+      <access-operations>read</access-operations>
+      <action>permit</action>
+    </rule>
+  </rule-list>
+  <rule-list>
+    <name>sysrepo-mcp-viewer</name>
+    <group>viewers</group>
+    <rule>
+      <name>sysrepo-mcp-read</name>
+      <module-name>sysrepo-mcp</module-name>
+      <access-operations>read</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>sysrepo-mcp-write-deny</name>
+      <module-name>sysrepo-mcp</module-name>
+      <access-operations>create update delete</access-operations>
+      <action>deny</action>
+    </rule>
+    <rule>
+      <name>sysrepo-mcp-exec-deny</name>
+      <module-name>sysrepo-mcp</module-name>
+      <access-operations>exec</access-operations>
+      <action>deny</action>
+    </rule>
+    <rule>
+      <name>oven-read</name>
+      <module-name>oven</module-name>
+      <access-operations>read</access-operations>
+      <action>permit</action>
+    </rule>
+    <rule>
+      <name>oven-exec-deny</name>
+      <module-name>oven</module-name>
+      <access-operations>exec</access-operations>
+      <action>deny</action>
+    </rule>
+    <rule>
+      <name>sysrepo-mcp-test-read</name>
+      <module-name>sysrepo-mcp-test</module-name>
+      <access-operations>read</access-operations>
+      <action>permit</action>
+    </rule>
+  </rule-list>
+</nacm>
+"""
+
+
+def _load_nacm_config(env: dict[str, str]) -> None:
+    """Install ietf-netconf-acm module (if not yet installed) and load
+    the NACM XML configuration into the running datastore."""
+    import ctypes.util
+    import sys
+
+    # Install ietf-netconf-acm module first (sysrepoctl).
+    result = _install_module(
+        env,
+        "ietf-netconf-acm",
+        _IETF_NACM_YANG,
+        [_IETF_NACM_YANG.parent],
+    )
+    if not result.installed:
+        raise RuntimeError(
+            f"could not install ietf-netconf-acm.yang:\n{result.output}"
+        )
+
+    # Load NACM configuration via sysrepo + libyang APIs.
+    # lyd_parse_data_mem belongs to libyang, not libsysrepo — two
+    # separate CDLL handles are required.
+    libsysrepo_path = ctypes.util.find_library("sysrepo")
+    if libsysrepo_path is None:
+        raise RuntimeError("libsysrepo.so not found in library path")
+    libsysrepo = ctypes.CDLL(libsysrepo_path)
+
+    libyang_path = ctypes.util.find_library("yang")
+    if libyang_path is None:
+        raise RuntimeError("libyang.so not found in library path")
+    libyang = ctypes.CDLL(libyang_path)
+
+    # sysrepo calls
+    _sr_connect = libsysrepo.sr_connect
+    _sr_connect.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p)]
+    _sr_connect.restype = ctypes.c_int
+
+    _sr_session_start = libsysrepo.sr_session_start
+    _sr_session_start.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+    _sr_session_start.restype = ctypes.c_int
+
+    _sr_acquire_context = libsysrepo.sr_acquire_context
+    _sr_acquire_context.argtypes = [ctypes.c_void_p]
+    _sr_acquire_context.restype = ctypes.c_void_p
+
+    _sr_edit_batch = libsysrepo.sr_edit_batch
+    _sr_edit_batch.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    _sr_edit_batch.restype = ctypes.c_int
+
+    _sr_apply_changes = libsysrepo.sr_apply_changes
+    _sr_apply_changes.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    _sr_apply_changes.restype = ctypes.c_int
+
+    _sr_session_stop = libsysrepo.sr_session_stop
+    _sr_session_stop.argtypes = [ctypes.c_void_p]
+    _sr_session_stop.restype = ctypes.c_int
+
+    _sr_disconnect = libsysrepo.sr_disconnect
+    _sr_disconnect.argtypes = [ctypes.c_void_p]
+    _sr_disconnect.restype = ctypes.c_int
+
+    # libyang call (separate CDLL handle)
+    _lyd_parse_data_mem = libyang.lyd_parse_data_mem
+    _lyd_parse_data_mem.argtypes = [
+        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_void_p]
+    _lyd_parse_data_mem.restype = ctypes.c_int  # LY_ERR (0 = success)
+
+    conn = ctypes.c_void_p()
+    sess = ctypes.c_void_p()
+    ly_ctx = ctypes.c_void_p()
+    tree = ctypes.c_void_p()
+
+    rc = _sr_connect(0, ctypes.byref(conn))
+    if rc:
+        raise RuntimeError(f"sr_connect: {rc}")
+    rc = _sr_session_start(conn, 2, ctypes.byref(sess))  # SR_DS_RUNNING = 2
+    if rc:
+        _sr_disconnect(conn)
+        raise RuntimeError(f"sr_session_start: {rc}")
+    ly_ctx = _sr_acquire_context(conn)
+    if not ly_ctx:
+        _sr_session_stop(sess)
+        _sr_disconnect(conn)
+        raise RuntimeError("sr_acquire_context: NULL")
+
+    rc = _lyd_parse_data_mem(
+        ly_ctx, _NACM_XML.encode("utf-8"), 4, 0, 0, ctypes.byref(tree)
+    )
+    if rc:
+        _sr_session_stop(sess)
+        _sr_disconnect(conn)
+        raise RuntimeError(f"lyd_parse_data_mem: {rc}")
+
+    rc = _sr_edit_batch(sess, tree)
+    if rc:
+        _sr_session_stop(sess)
+        _sr_disconnect(conn)
+        raise RuntimeError(f"sr_edit_batch: {rc}")
+
+    rc = _sr_apply_changes(sess, 0)
+    if rc:
+        _sr_session_stop(sess)
+        _sr_disconnect(conn)
+        raise RuntimeError(f"sr_apply_changes: {rc}")
+
+    _sr_session_stop(sess)
+    _sr_disconnect(conn)
+
+
 @pytest.fixture(scope="session")
 def installed_modules(sysrepo_env: dict[str, str]) -> dict[str, ModuleInstall]:
     """
@@ -821,15 +1081,17 @@ def mcp_auth(
             extra_headers={"Authorization": "Bearer test-admin-key-0001"},
         )
     except OSError as exc:  # pragma: no cover - environment failure
-        _, output = proc.communicate(timeout=5)
-        print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
+        output, _ = proc.communicate(timeout=5)
+        if output:
+            print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
         pytest.skip(
             f"cannot reach the server: {exc}\n{_tail(errorlog)}"
         )
 
     if probe.status != 200:
-        _, output = proc.communicate(timeout=5)
-        print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
+        output, _ = proc.communicate(timeout=5)
+        if output:
+            print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
         proc.terminate()
         pytest.fail(
             f"the server answered HTTP {probe.status} to get_status.\n"
@@ -842,6 +1104,16 @@ def mcp_auth(
         client._print_pipe(proc.stdout, "server stdout")
     if proc.stderr is not None:
         client._print_pipe(proc.stderr, "server stderr")
+
+    # Load NACM configuration: install ietf-netconf-acm module, then write
+    # the rule set into the running datastore so that NACM is enforced.
+    try:
+        _load_nacm_config(auth_sysrepo_env)
+    except RuntimeError as exc:  # pragma: no cover - environment failure
+        output, _ = proc.communicate(timeout=5)
+        if output:
+            print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
+        pytest.fail(f"NACM load failed: {exc}")
 
     yield client
 
