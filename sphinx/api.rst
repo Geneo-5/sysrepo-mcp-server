@@ -68,7 +68,10 @@ For ``tools/call``, ``Mcp-Name`` must match ``params.name``. For example::
 Modern requests are independent; the server does not return
 ``Mcp-Session-Id``. The session-bound notification subscription tools are
 available only through the legacy handshake. Requests with an ``Origin``
-header receive HTTP 403 by default.
+header receive HTTP 403 by default. Modern ``server/discover`` and
+``tools/list`` results include ``ttlMs: 0`` and ``cacheScope: "private"``:
+clients must treat each response as immediately stale and must not reuse it
+across authorization contexts.
 
 ``initialize``
 ^^^^^^^^^^^^^^

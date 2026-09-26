@@ -11,11 +11,12 @@ actions, and explore YANG schemas.
 > (API keys from the libconfig file, compared byte-by-byte to resist timing
 > attacks — **not currently hashed at rest**, see `sphinx/todo.rst` findings)
 > and NACM are wired in and enforced on every operation, including RPCs and
-> actions
-> (`sr_nacm_check_operation()` in `rpc_common()`) — P0 in `sphinx/todo.rst`
-> is complete. Logging uses elog with configurable syslog, file and console
-> back ends. The shared session store is still absent (`max-procs` must stay 1). The detailed roadmap, which is
-> authoritative on the real state of the code, is in
+> actions; key hashing remains open under P0.3 in `sphinx/todo.rst`
+> (`sr_nacm_check_operation()` in `rpc_common()`). The rest of P0 is
+> implemented. Logging uses elog with configurable syslog, file and console
+> back ends. The shared session store is still absent (`max-procs` must stay
+> 1). The detailed roadmap, which is authoritative on the real state of the
+> code, is in
 > [`sphinx/todo.rst`](sphinx/todo.rst).
 
 > **Access control is only as good as the deployment config.** With no API

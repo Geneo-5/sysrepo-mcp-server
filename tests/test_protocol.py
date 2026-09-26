@@ -100,6 +100,8 @@ def test_modern_server_discovery(mcp):
     assert response.status == 200
     result = response.json()["result"]
     assert result["resultType"] == "complete"
+    assert result["ttlMs"] == 0
+    assert result["cacheScope"] == "private"
     assert result["supportedVersions"] == ["2026-07-28", "2025-11-25"]
     assert result["capabilities"]["tools"] == {}
     assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "sysrepo-mcp"
@@ -112,6 +114,8 @@ def test_modern_tools_list_is_complete_and_sessionless(mcp):
     assert response.status == 200
     result = response.json()["result"]
     assert result["resultType"] == "complete"
+    assert result["ttlMs"] == 0
+    assert result["cacheScope"] == "private"
     names = {tool["name"] for tool in result["tools"]}
     assert "sr_get_config" in names
     assert "sr_notif_subscribe" not in names

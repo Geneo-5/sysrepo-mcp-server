@@ -268,8 +268,8 @@ the proxy forwards it as the ``HTTP_AUTHORIZATION`` FastCGI parameter.
    attach to the process can read every key. The comparison in
    ``mcp_config_find_key()`` is byte-by-byte over the full key length, which
    resists a timing attack, but that is not the same as hashing at rest.
-   ``sphinx/todo.rst`` currently marks "store keys hashed" as done under P0;
-   it is not, and is tracked as a *Findings from this review* item there.
+   ``sphinx/todo.rst`` tracks hashing as an open P0.3 item. Do not expose
+   this deployment to an untrusted agent until that item is complete.
 
 Cookie
 ~~~~~~

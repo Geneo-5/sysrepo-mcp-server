@@ -100,13 +100,10 @@ Findings from this review (not yet triaged into a priority)
   authentication problem; ``-32007`` is unused and would be a natural home
   for it, but this needs an explicit decision (and a test) before changing
   the wire contract.
-- ``sphinx/architecture.rst`` is the most out of date of the three docs:
-  its own "Authentication" section still says "Not implemented" and
-  describes looking the key up in a removed YANG module
-  (``/sysrepo-mcp:api-key``), and "Configuration model" still lists the API
-  key list as living in ``yang/sysrepo-mcp.yang``. Both contradict the
-  chapter's own opening warning, which already says authentication is
-  implemented. Needs the same reconciliation pass as the other three docs.
+- ``sphinx/architecture.rst``'s authentication description now correctly
+  says keys are plaintext in the config file and process memory, but it still
+  says this roadmap marks hashing as done. Update that cross-reference when
+  closing P0.3.
 
 **Test regressions from the previous development run are resolved.** The
 NACM fixture now installs ``oven``, ``sr_get_config`` preserves the previous
@@ -131,6 +128,16 @@ tools are omitted from modern ``tools/list``. Modern requests with an
 ``Origin`` header are rejected by default because no browser-origin allow-list
 is configured, so browser clients require a future explicit allow-list
 configuration. The full suite passed with this behavior in place.
+
+**Live MCP connection reports ``tools/list`` schema rejection.** The user
+reports the connector rejects missing ``ttlMs`` and ``cacheScope``. This
+matches the 2026-07-28 result schema: both fields are required on
+``tools/list`` and ``server/discover``. Added ``ttlMs: 0`` and
+``cacheScope: "private"`` to both modern responses and regression tests;
+the full Docker suite passes (258 passed, 0 failed). The updated responder
+must still be deployed/restarted and retried in the live connector; this
+session has not been given callable ``sysrepo-mcp`` tools to check that final
+runtime step.
 
 P0 — Security (blocks any untrusted deployment)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

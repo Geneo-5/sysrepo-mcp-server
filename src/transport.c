@@ -187,6 +187,9 @@ method_server_discover(FCGX_Request *req, struct json_object *id)
 	                      json_object_new_string(MCP_LEGACY_PROTOCOL_VERSION));
 	json_object_object_add(result, "resultType",
 	                       json_object_new_string("complete"));
+	json_object_object_add(result, "ttlMs", json_object_new_int(0));
+	json_object_object_add(result, "cacheScope",
+	                       json_object_new_string("private"));
 	json_object_object_add(result, "supportedVersions", versions);
 	json_object_object_add(capabilities, "tools", tools_cap);
 	json_object_object_add(result, "capabilities", capabilities);
@@ -294,9 +297,16 @@ method_tools_list(FCGX_Request *req, struct json_object *id, int modern)
 		json_object_array_add(list, entry);
 	}
 
-	if (modern)
+	if (modern) {
 		json_object_object_add(result, "resultType",
 		                       json_object_new_string("complete"));
+		/* Keep the catalogue scoped to this authorization context and
+		 * immediately stale; this is conservative if per-user filtering is
+		 * added later and avoids requiring list-change invalidation. */
+		json_object_object_add(result, "ttlMs", json_object_new_int(0));
+		json_object_object_add(result, "cacheScope",
+		                       json_object_new_string("private"));
+	}
 	json_object_object_add(result, "tools", list);
 	rpc_send_result(req, NULL, id, result);
 }
