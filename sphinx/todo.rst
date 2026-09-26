@@ -242,16 +242,16 @@ agent to guess or work around a limitation.
    b. Give every node its full xpath as a field of the node object itself,
       not only in the side ``nodes`` flat array as today: an agent reading
       the nested tree must never have to reconstruct a path from parent
-      names. Decide whether the flat ``nodes`` array is kept once xpath is
-      inline everywhere (redundant, but a smaller change for existing
-      clients) or dropped in the same breaking revision as (e).
-   c. ``get_tree``: extend the per-node JSON towards a transcription of
+      names. Decision: drop the redundant flat ``nodes`` array in the same
+      breaking revision as (e).
+   c. ~~``get_tree``: extend the per-node JSON towards a transcription of
       ``LYS_OUT_TREE`` (the shape ``yanglint -f tree`` prints). In addition
       to the existing ``type``/``config``, add ``mandatory``, cardinality
       for lists and leaf-lists (``min-elements``/``max-elements``), the key
       list of a list, whether a container is ``presence``, choice/case
       grouping, and whether the node comes from an ``augment``. This is new
-      information, not a reshuffle of what ``get_help`` already computes.
+      information, not a reshuffle of what ``get_help`` already computes.~~
+      Implemented in the current tree output.
    d. ``get_help`` → ``get_schema``: move ``add_leaf_help()`` and
       ``res_add_range()`` (already correct for leaf/leaf-list) into the
       shared walker so every visited node — not only the one named by

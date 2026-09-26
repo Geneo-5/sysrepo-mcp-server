@@ -21,77 +21,152 @@
 #include <sysrepo/mcp/schema.h>
 #include <sysrepo/mcp/libconfig.h>
 
-/* ---------------------------------------------------------------- schema_node_to_json
- *
- * Recursively serialize a YANG schema node to JSON. When `flat` is non-NULL,
- * also append a flat entry (xpath + type + config) to the flat array. The
- * `parent_path` carries the parent's path so children can be addressed as
- * absolute XPaths.
- *
- * Children are grouped under a `children` object keyed by name. A depth limit
- * (mcp_config_get()->max_tree_depth) prevents unbounded recursion on deeply nested schemas.
- */
+/* The walker owns recursion and depth policy. Each schema tool supplies a
+ * callback that adds the fields its output contract needs to a visited node. */
+typedef void (*schema_node_callback)(struct json_object *object,
+				     const struct lysc_node *node,
+				     const char *xpath, void *data);
+
+struct schema_walk {
+	int depth_limit;
+	schema_node_callback callback;
+	void *callback_data;
+};
+
+static struct json_object *
+schema_walk_node(const struct lysc_node *node, const char *xpath, int depth,
+		 const struct schema_walk *walk)
+{
+	struct json_object *obj = json_object_new_object();
+	const struct lysc_node *child;
+
+	walk->callback(obj, node, xpath, walk->callback_data);
+	if (depth < walk->depth_limit) {
+		struct json_object *children = NULL;
+		char child_xpath[1024];
+
+		for (child = lysc_node_child(node); child; child = child->next) {
+			snprintf(child_xpath, sizeof(child_xpath), "%s/%s",
+			         xpath, child->name);
+			if (!children)
+				children = json_object_new_object();
+			json_object_object_add(children, child->name,
+			                       schema_walk_node(child, child_xpath,
+			                                        depth + 1, walk));
+		}
+		if (children)
+			json_object_object_add(obj, "children", children);
+	}
+	return obj;
+}
+
+struct tree_callback_data {
+	int with_descriptions;
+	struct json_object *flat;
+};
+
+static void
+tree_node_callback(struct json_object *obj, const struct lysc_node *node,
+		   const char *xpath, void *data)
+{
+	struct tree_callback_data *tree = data;
+
+	json_object_object_add(obj, "type", nodetype_to_json(node->nodetype));
+	json_object_object_add(obj, "xpath", json_object_new_string(xpath));
+	json_object_object_add(obj, "config",
+	                       json_object_new_boolean(
+	                               (node->flags & LYS_CONFIG_W) ? 1 : 0));
+	json_object_object_add(obj, "mandatory",
+	                       json_object_new_boolean(
+	                               (node->flags & LYS_MAND_TRUE) ? 1 : 0));
+	json_object_object_add(obj, "augmented",
+	                       json_object_new_boolean(
+	                               node->parent && node->module !=
+	                               node->parent->module));
+	if (node->nodetype == LYS_CONTAINER) {
+		json_object_object_add(obj, "presence",
+		                       json_object_new_boolean(
+	                               (node->flags & LYS_PRESENCE) ? 1 : 0));
+	}
+	if (node->nodetype == LYS_LIST || node->nodetype == LYS_LEAFLIST) {
+		uint32_t min, max;
+		struct json_object *keys = NULL;
+		if (node->nodetype == LYS_LIST) {
+			const struct lysc_node_list *list =
+				(const struct lysc_node_list *)node;
+			const struct lysc_node *key;
+			min = list->min;
+			max = list->max;
+			keys = json_object_new_array();
+			for (key = list->child; key; key = key->next) {
+				if (lysc_is_key(key))
+					json_object_array_add(keys,
+						json_object_new_string(key->name));
+			}
+			json_object_object_add(obj, "keys", keys);
+		} else {
+			const struct lysc_node_leaflist *leaflist =
+				(const struct lysc_node_leaflist *)node;
+			min = leaflist->min;
+			max = leaflist->max;
+		}
+		json_object_object_add(obj, "min-elements",
+		                       json_object_new_int64(min));
+		if (max)
+			json_object_object_add(obj, "max-elements",
+			                       json_object_new_int64(max));
+		else
+			json_object_object_add(obj, "max-elements",
+			                       json_object_new_string("unbounded"));
+	}
+	if (node->parent && node->parent->nodetype == LYS_CASE) {
+		json_object_object_add(obj, "case",
+		                       json_object_new_string(node->parent->name));
+		if (node->parent->parent &&
+		    node->parent->parent->nodetype == LYS_CHOICE)
+			json_object_object_add(obj, "choice",
+			                       json_object_new_string(
+			                               node->parent->parent->name));
+	} else if (node->parent && node->parent->nodetype == LYS_CHOICE) {
+		json_object_object_add(obj, "choice",
+		                       json_object_new_string(node->parent->name));
+	}
+	if (tree->with_descriptions && node->dsc)
+		json_object_object_add(obj, "description",
+	                               json_object_new_string(node->dsc));
+	if (tree->flat) {
+		struct json_object *entry = json_object_new_object();
+		json_object_object_add(entry, "xpath", json_object_new_string(xpath));
+		json_object_object_add(entry, "type", nodetype_to_json(node->nodetype));
+		json_object_object_add(entry, "config",
+	                       json_object_new_boolean(
+	                               (node->flags & LYS_CONFIG_W) ? 1 : 0));
+		json_object_array_add(tree->flat, entry);
+	}
+}
 
 struct json_object *
 schema_node_to_json(const struct lysc_node *node, int with_desc, int depth,
 		    int effective_depth, struct json_object *flat,
 		    const char *parent_path)
 {
-	struct json_object     *obj = json_object_new_object();
-	const struct lysc_node *child;
-	char                    path[1024];
+	char path[1024];
+	struct schema_walk walk = {
+		.depth_limit = effective_depth,
+		.callback = tree_node_callback,
+	};
+	struct tree_callback_data data = {
+		.with_descriptions = with_desc,
+		.flat = flat,
+	};
 
-	if (parent_path && *parent_path) {
+	if (parent_path && *parent_path)
 		snprintf(path, sizeof(path), "%s/%s", parent_path, node->name);
-	} else {
-		/* A top-level node is addressed by /<module>:<name>, and that
-		 * prefix is what makes the flat list usable as XPaths. */
+	else
 		snprintf(path, sizeof(path), "/%s:%s",
-		        node->module ? node->module->name : "", node->name);
-	}
-
-	json_object_object_add(obj, "type", nodetype_to_json(node->nodetype));
-	json_object_object_add(obj, "xpath", json_object_new_string(path));
-	json_object_object_add(obj, "config",
-	                       json_object_new_boolean(
-			       (node->flags & LYS_CONFIG_W) ? 1 : 0));
-
-	if (with_desc && node->dsc)
-		json_object_object_add(obj, "description",
-		                       json_object_new_string(node->dsc));
-
-	if (flat) {
-		struct json_object *entry = json_object_new_object();
-
-		json_object_object_add(entry, "xpath",
-		                       json_object_new_string(path));
-		json_object_object_add(entry, "type",
-		                       nodetype_to_json(node->nodetype));
-		json_object_object_add(entry, "config",
-		                       json_object_new_boolean(
-				       (node->flags & LYS_CONFIG_W) ?
-				       1 : 0));
-		json_object_array_add(flat, entry);
-	}
-
-	if (depth < effective_depth) {
-		struct json_object *children = NULL;
-
-		for (child = lysc_node_child(node); child;
-		     child = child->next) {
-			if (!children)
-				children = json_object_new_object();
-			json_object_object_add(children, child->name,
-			                       schema_node_to_json(
-			       child, with_desc, depth + 1,
-			       effective_depth, flat, path));
-		}
-
-		if (children)
-			json_object_object_add(obj, "children", children);
-	}
-
-	return obj;
+		         node->module ? node->module->name : "", node->name);
+	walk.callback_data = &data;
+	return schema_walk_node(node, path, depth, &walk);
 }
 
 /* ------------------------------------------------------------------- get_tree

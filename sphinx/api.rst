@@ -1275,8 +1275,11 @@ build valid XPaths without reading the YANG source.
 
 ``tree`` (object)
    Hierarchical schema, with the module name, namespace, prefix and revision.
-   Every node object carries its absolute ``xpath`` as well as ``type`` and
-   ``config``.
+   Each node carries its absolute ``xpath``, ``type``, ``config``,
+   ``mandatory``, and ``augmented`` fields. Containers include ``presence``;
+   lists and leaf-lists include ``min-elements`` and ``max-elements``; lists
+   also include their ``keys``. Nodes under choices and cases identify their
+   ``choice`` and ``case``.
 
 ``nodes`` (array of objects)
    Flat list, each with ``xpath``, ``type`` and ``config``.

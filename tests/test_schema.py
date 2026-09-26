@@ -164,6 +164,33 @@ def test_schema_depth_two_includes_grandchildren(mcp_module):
     assert "children" in session
 
 
+def test_tree_reports_list_constraints_and_keys(mcp_module):
+    result = mcp_module.tool(
+        "get_tree", {"module": "sysrepo-mcp-test",
+                     "xpath": "/sysrepo-mcp-test:api-key"}
+    )
+    node = result["tree"]["nodes"]["api-key"]
+
+    assert node["keys"] == ["key"]
+    assert node["min-elements"] == 0
+    assert node["max-elements"] == "unbounded"
+
+
+def test_tree_reports_mandatory_and_presence(mcp_module):
+    result = mcp_module.tool(
+        "get_tree", {"module": "sysrepo-mcp-test",
+                     "xpath": "/sysrepo-mcp-test:api-key"}
+    )
+    node = result["tree"]["nodes"]["api-key"]
+
+    assert node["children"]["user"]["mandatory"] is True
+    state = mcp_module.tool(
+        "get_tree", {"module": "sysrepo-mcp-test",
+                     "xpath": "/sysrepo-mcp-test:server-state"}
+    )["tree"]["nodes"]["server-state"]
+    assert state["presence"] is False
+
+
 def test_module_root_and_explicit_slash_agree(mcp_oven, tree):
     explicit = mcp_oven.tool("get_tree", {"module": "oven", "xpath": "/"})
 
