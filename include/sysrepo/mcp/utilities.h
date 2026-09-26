@@ -109,7 +109,7 @@ void mcp_err_from_session(struct mcp_err *err, sr_session_ctx_t *sess, int rc,
 
 /** Serialise a libyang tree to a json-c object. NULL tree → empty object. */
 struct json_object *tree_to_json(const struct lyd_node *tree,
-				 struct mcp_err *err);
+				 uint32_t print_options, struct mcp_err *err);
 
 /** Return the lowercased node type string ("RPC" → "rpc"). */
 struct json_object *nodetype_to_json(uint16_t nodetype);

@@ -175,7 +175,8 @@ mcp_err_from_session(struct mcp_err *err, sr_session_ctx_t *sess, int rc,
  * a legitimate answer.
  */
 struct json_object *
-tree_to_json(const struct lyd_node *tree, struct mcp_err *err)
+tree_to_json(const struct lyd_node *tree, uint32_t print_options,
+	     struct mcp_err *err)
 {
 	struct json_object *obj;
 	char *text = NULL;
@@ -183,7 +184,8 @@ tree_to_json(const struct lyd_node *tree, struct mcp_err *err)
 	if (!tree)
 		return json_object_new_object();
 
-	if (lyd_print_mem(&text, tree, LYD_JSON, LYD_PRINT_SIBLINGS) !=
+	if (lyd_print_mem(&text, tree, LYD_JSON,
+	                  LYD_PRINT_SIBLINGS | print_options) !=
 	    LY_SUCCESS) {
 		mcp_err_set(err, MCP_ERR_INTERNAL, "Internal error",
 			    "lyd_print_mem failed");

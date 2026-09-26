@@ -63,7 +63,10 @@ const struct tool_desc tools[] = {
 		"\"xpath\":{\"type\":\"string\"},"
 		"\"datastore\":{\"type\":\"string\","
 		"\"enum\":[\"running\",\"startup\",\"candidate\"],"
-		"\"default\":\"running\"}},"
+		"\"default\":\"running\"},"
+		"\"options\":{\"type\":\"array\",\"items\":{"
+		"\"type\":\"string\",\"enum\":[\"trim-defaults\","
+		"\"all-defaults\"]}}},"
 		"\"required\":[\"xpath\"]}",
 		tool_sr_get_config, 1
 	},

@@ -112,7 +112,7 @@ rpc_common(struct tool_ctx *ctx, struct json_object *args, struct mcp_err *err)
 		return NULL;
 	}
 
-	payload = tree_to_json(output ? output->tree : NULL, err);
+	payload = tree_to_json(output ? output->tree : NULL, 0, err);
 	sr_release_data(output);
 
 	if (!payload)

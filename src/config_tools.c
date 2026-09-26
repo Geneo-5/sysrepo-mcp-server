@@ -36,6 +36,12 @@ tool_sr_get_config(struct tool_ctx *ctx, struct json_object *args,
 	struct json_object *res;
 	struct json_object *payload;
 	int                 max_depth = arg_int(args, "max_depth", 0);
+	struct json_object *options = NULL;
+	int                 has_options = args &&
+		json_object_object_get_ex(args, "options", &options);
+	/* Preserve the existing libyang output unless the caller opts into a
+	 * default-value policy explicitly. */
+	uint32_t            print_options = 0;
 	int                 rc;
 
 	if (!xpath)
@@ -53,6 +59,40 @@ tool_sr_get_config(struct tool_ctx *ctx, struct json_object *args,
 			    "max_depth must not be negative");
 		return NULL;
 	}
+	if (has_options && !json_object_is_type(options, json_type_array)) {
+		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+		            "options must be an array of option strings");
+		return NULL;
+	}
+	if (has_options) {
+		size_t i, count = json_object_array_length(options);
+		if (count > 1) {
+			mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+			            "options accepts at most one value: "
+			            "'trim-defaults' or 'all-defaults'");
+			return NULL;
+		}
+		for (i = 0; i < count; i++) {
+			struct json_object *item = json_object_array_get_idx(options, i);
+			const char *value;
+			if (!item || !json_object_is_type(item, json_type_string)) {
+				mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+				            "each options entry must be a string");
+				return NULL;
+			}
+			value = json_object_get_string(item);
+			if (!strcmp(value, "trim-defaults"))
+				print_options = LYD_PRINT_WD_TRIM;
+			else if (!strcmp(value, "all-defaults"))
+				print_options = LYD_PRINT_WD_ALL;
+			else {
+				mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+				            "unknown option '%s'; use 'trim-defaults' "
+				            "or 'all-defaults'", value);
+				return NULL;
+			}
+		}
+	}
 
 	rc = sr_session_switch_ds(ctx->sess, ds);
 	if (rc != SR_ERR_OK) {
@@ -68,7 +108,7 @@ tool_sr_get_config(struct tool_ctx *ctx, struct json_object *args,
 		return NULL;
 	}
 
-	payload = tree_to_json(data ? data->tree : NULL, err);
+	payload = tree_to_json(data ? data->tree : NULL, print_options, err);
 	sr_release_data(data);
 
 	if (!payload)

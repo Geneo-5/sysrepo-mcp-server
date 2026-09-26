@@ -60,7 +60,7 @@ tool_sr_get_operational(struct tool_ctx *ctx, struct json_object *args,
 		return NULL;
 	}
 
-	payload = tree_to_json(data ? data->tree : NULL, err);
+	payload = tree_to_json(data ? data->tree : NULL, 0, err);
 	sr_release_data(data);
 
 	if (!payload)

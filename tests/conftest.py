@@ -612,6 +612,19 @@ def nacm_config(auth_sysrepo_env: dict[str, str]) -> dict[str, str]:
     import subprocess
     import tempfile
 
+    # This repository is intentionally isolated from the regular test repo.
+    # Install the oven schema here too, because test_nacm_denied_rpc invokes
+    # its insert-food RPC and rpc_common() must be able to resolve that path
+    # before NACM can deny it.
+    result = _install_module(
+        auth_sysrepo_env,
+        "oven",
+        OVEN_YANG,
+        [OVEN_YANG.parent],
+    )
+    if not result.available or not result.installed:
+        pytest.fail(f"could not install oven.yang for auth tests:\n{result.output}")
+
     # Install ietf-netconf-acm module first (sysrepoctl).
     result = _install_module(
         auth_sysrepo_env,

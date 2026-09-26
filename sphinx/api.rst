@@ -342,6 +342,13 @@ sr_get_config
 ``max_depth`` (integer, optional)
    Maximum subtree depth, 0 meaning unlimited. Default 0.
 
+``options`` (array of strings, optional)
+   Select how default values are printed. ``["trim-defaults"]`` trims
+   default-valued nodes; ``["all-defaults"]`` prints all default values
+   represented in the returned tree. Omitting the parameter preserves
+   libyang's existing output. Pass at most one option; an empty array is
+   equivalent to omitting it.
+
 .. note::
 
    ``max_depth`` replaces the ``depth`` argument of earlier drafts, whose

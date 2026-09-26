@@ -294,13 +294,13 @@ agent to guess or work around a limitation.
    (datastore by datastore) to copy one datastore's content into another
    (e.g. ``startup → running``, ``candidate → running``) — the YANG
    equivalent of NETCONF's ``copy-config``.
-5. **Default values: minimum by default.** The call chain is
+5. ~~**Default values: selectable output.**~~ The call chain is
    ``sr_get_config`` → ``sr_get_data()`` (without ``LYD_OPT_DEFAULT``) →
-   ``tree_to_json()`` → ``lyd_print_mem()``: the returned tree only holds
-   explicitly written leaves, and JSON printing does not add implicit
-   values. ``sr_get_config`` should accept an ``options`` parameter
-   (default ``0``) passed to ``tree_to_json()``: ``LYD_PRINT_WD_TRIM`` (16,
-   the minimum) by default, ``LYD_PRINT_WD_ALL`` (32) to see everything.
+   ``tree_to_json()`` → ``lyd_print_mem()``. ``sr_get_config`` accepts an
+   ``options`` string list: ``trim-defaults`` or ``all-defaults``. Omitting
+   the list preserves the prior libyang output. These choices control
+   printing of defaults in the returned tree; they do not request that
+   sysrepo materialize implicit defaults absent from that tree.
 6. ``sr_list_modules`` does not report enabled features.
 
 P3 — Logging and packaging
