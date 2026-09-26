@@ -330,7 +330,12 @@ P3 — Logging and packaging
 2. Apply the log level and backend selection from libconfig. The implementation
    is in place; ``verbose`` selects debug severity unless ``--log-level`` is
    given. Docker build verification is pending.
-3. Ship a systemd unit and an example lighttpd fragment.
+3. ~~Ship a systemd unit and an example lighttpd fragment.~~ The sample
+   unit runs lighttpd, which spawns the MCP responder through ``bin-path``.
+   Directly starting the responder is not supported: ``FCGX_InitRequest()``
+   uses descriptor 0 and the code has no ``FCGX_OpenSocket()`` path. Remove
+   the old architecture claim that transport settings create a listener; an
+   nginx-to-standalone-responder deployment remains future work.
 4. Revisit whether ``sr_module_install`` and ``sr_module_uninstall`` can be
    allowed for identities with the right NACM permissions instead of being
    denied outright. (P0 is done; the denial was a temporary blocker.)
@@ -381,6 +386,9 @@ No immediate blocker, but worth keeping on the radar.
    e. Tests: a leaf changed, a list entry added/removed/reordered, and the
       no-op case (empty ``diff``, ``changed: 0``).
 3. Metrics export.
+4. Add a standalone FastCGI listener for externally started deployments.
+   The current responder only accepts the proxy-spawned descriptor-0 socket;
+   nginx and systemd socket activation need an ``FCGX_OpenSocket()`` path.
 
 .. note::
 

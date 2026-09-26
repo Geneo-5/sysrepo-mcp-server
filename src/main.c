@@ -278,6 +278,16 @@ sysrepo_open(void)
 	int rc;
 	sr_session_ctx_t *sess;
 
+	const char *repository_path = getenv("SYSREPO_REPOSITORY_PATH");
+
+	if ((!repository_path || !*repository_path) &&
+	    setenv("SYSREPO_REPOSITORY_PATH",
+	           CONFIG_SYSREPO_MCP_SERVER_SYSREPO_DATASTORE_DIR, 1)) {
+		mcp_log_err("cannot set SYSREPO_REPOSITORY_PATH: %s",
+		            strerror(errno));
+		return -1;
+	}
+
 	if ((rc = sr_connect(0, &g_conn)) != SR_ERR_OK) {
 		mcp_log_err("sr_connect: %s", sr_strerror(rc));
 		return rc;

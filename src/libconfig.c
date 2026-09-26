@@ -7,13 +7,13 @@
  *
  * Parses the libconfig file described in docker/sysrepo-mcp.conf into a
  * struct mcp_config. See include/sysrepo/mcp/libconfig.h for the field
- * list and its mapping back to the SYSREPO_MCP_SERVER_* names that used to
- * be either a Kconfig option or a leaf in yang/sysrepo-mcp.yang.
+ * list and its mapping back to settings that formerly lived in Kconfig or
+ * yang/sysrepo-mcp.yang.
  *
- * mcp_config_set_defaults() carries the exact same defaults as the Kconfig
- * symbols in config.in, so a file that sets nothing still yields a working,
- * secure-by-default configuration (no API keys means nobody can
- * authenticate, which is the safe failure mode).
+ * mcp_config_set_defaults() provides built-in defaults for omitted settings.
+ * Authentication defaults to "none" for compatibility: an instance with no
+ * configured keys is unauthenticated and runs with the service account's
+ * sysrepo permissions. Operators must enable authentication before exposure.
  */
 
 #include <stdio.h>
@@ -27,8 +27,8 @@
 
 /* ---------------------------------------------------------------------- ranges
  *
- * Mirrors the `range' lines in config.in. Kept as macros so the bound and
- * the option it applies to stay next to each other at the call site.
+ * Runtime bounds for libconfig values. Kept as macros so the bound and
+ * the setting it applies to stay next to each other at the call site.
  */
 
 #define MCP_RANGE_MAX_SESSIONS_MIN       1
@@ -39,8 +39,6 @@
 #define MCP_RANGE_NOTIF_QUEUE_SIZE_MAX   65536
 #define MCP_RANGE_MAX_TREE_DEPTH_MIN     1
 #define MCP_RANGE_MAX_TREE_DEPTH_MAX     256
-#define MCP_RANGE_TCP_PORT_MIN           1
-#define MCP_RANGE_TCP_PORT_MAX           65535
 #define MCP_RANGE_LOG_LEVEL_MIN          0
 #define MCP_RANGE_LOG_LEVEL_MAX          7
 
@@ -69,8 +67,7 @@ xstrdup(const char *s)
  *
  * Copies a config_setting_t string value into a fixed-size struct field,
  * truncating with a warning rather than overflowing it. Used for the small
- * fields (paths, host, cookie name) that were plain fixed-size strings in
- * the Kconfig options they replace.
+ * fields (paths and cookie names) stored in the runtime config struct.
  */
 
 static void
@@ -134,13 +131,6 @@ mcp_config_set_defaults(struct mcp_config *cfg)
 	cfg->default_timeout_ms = 5000;
 	cfg->max_tree_depth    = 32;
 
-	cfg->transport_unix = 1;
-	cfg->transport_tcp  = 0;
-	copy_string(cfg->unix_socket_path, sizeof(cfg->unix_socket_path),
-	            "/var/run/sysrepo-mcp.sock");
-	copy_string(cfg->tcp_host, sizeof(cfg->tcp_host), "127.0.0.1");
-	cfg->tcp_port = 8080;
-
 	/* auth_method: 0 = "none" (no authentication), 1 = "bearer",
 	 * 2 = "cookie".  Default is "none" so that a file that sets
 	 * nothing behaves like the old unauthenticated server. */
@@ -191,44 +181,6 @@ load_session(config_t *cc, struct mcp_config *cfg)
 		                     60000))
 			return -1;
 		cfg->default_timeout_ms = (unsigned)v;
-	}
-	return 0;
-}
-
-/* ----------------------------------------------------------------- load_transport
- */
-
-static int
-load_transport(config_t *cc, struct mcp_config *cfg)
-{
-	const char *mode;
-	const char *str;
-	int         v;
-
-	if (config_lookup_string(cc, "server.transport.mode", &mode)) {
-		if (!strcmp(mode, "unix")) {
-			cfg->transport_unix = 1;
-			cfg->transport_tcp  = 0;
-		} else if (!strcmp(mode, "tcp")) {
-			cfg->transport_unix = 0;
-			cfg->transport_tcp  = 1;
-		} else {
-			mcp_log_err("libconfig: server.transport.mode must be \"unix\" or "
-			            "\"tcp\", got \"%s\"", mode);
-			return -1;
-		}
-	}
-	if (config_lookup_string(cc, "server.transport.unix_socket_path", &str))
-		copy_string(cfg->unix_socket_path,
-		            sizeof(cfg->unix_socket_path), str);
-	if (config_lookup_string(cc, "server.transport.tcp_host", &str))
-		copy_string(cfg->tcp_host, sizeof(cfg->tcp_host), str);
-	if (config_lookup_int(cc, "server.transport.tcp_port", &v)) {
-		if (check_range_uint("server.transport.tcp_port", v,
-		                     MCP_RANGE_TCP_PORT_MIN,
-		                     MCP_RANGE_TCP_PORT_MAX))
-			return -1;
-		cfg->tcp_port = (int)v;
 	}
 	return 0;
 }
@@ -359,19 +311,11 @@ mcp_config_load(const char *path, struct mcp_config *cfg)
 	if (rc == 0)
 		rc = load_schema(&cc, cfg);
 	if (rc == 0)
-		rc = load_transport(&cc, cfg);
-	if (rc == 0)
 		rc = load_auth(&cc, cfg);
 	if (rc == 0)
 		rc = load_log(&cc, cfg);
 
 	config_destroy(&cc);
-
-	if (rc == 0 && cfg->transport_unix && cfg->transport_tcp) {
-		mcp_log_err("libconfig: %s: server.transport.mode cannot be both unix and tcp",
-		           path);
-		return -1;
-	}
 
 	return rc;
 }

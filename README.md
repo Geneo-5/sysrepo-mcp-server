@@ -174,6 +174,10 @@ fastcgi.server = (
 )
 ```
 
+For a service-managed deployment, see the lighttpd and systemd examples in
+[`contrib/`](contrib/). They keep the responder proxy-spawned, as required by
+the current FastCGI implementation.
+
 ### Example session
 
 ```sh

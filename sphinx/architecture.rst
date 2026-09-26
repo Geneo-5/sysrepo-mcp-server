@@ -327,54 +327,22 @@ replacement for NACM rules.
 FastCGI transport
 -----------------
 
-The server runs as a FastCGI responder. Two deployment shapes are supported:
-
-**Proxy-spawned** (lighttpd ``bin-path``)
-   The proxy starts and supervises the process and hands the listening socket
-   over on descriptor 0. The socket options in ``config.in`` are unused.
-   ``max-procs`` must be 1.
-
-**Externally started**
-   The server creates its own listening socket, Unix or TCP, from the
-   ``config.in`` options, and the proxy connects to it. This is the shape to
-   use under an init system or in a container.
+The server currently runs as a proxy-spawned FastCGI responder. Lighttpd's
+``bin-path`` starts the process and passes its listening socket on descriptor
+0; ``max-procs`` must be 1 because sessions and notification queues are local
+to the process. The application does not create a FastCGI listening socket
+itself. An externally started responder
+(for example behind nginx) is not supported yet.
 
 lighttpd
 ~~~~~~~~
 
-.. code-block:: none
-
-   server.modules += ( "mod_fastcgi" )
-
-   fastcgi.server = (
-       "/mcp" => (
-           "sysrepo-mcp" => (
-               "socket"      => "/var/run/sysrepo-mcp.sock",
-               "bin-path"    => "/usr/local/bin/sysrepo-mcp",
-               "check-local" => "disable",
-               "max-procs"   => 1
-           )
-       )
-   )
-
-nginx
-~~~~~
-
-nginx never spawns the application, so the server must already be listening:
-
-.. code-block:: none
-
-   location /mcp {
-       include            fastcgi_params;
-       fastcgi_pass       unix:/var/run/sysrepo-mcp.sock;
-       fastcgi_param      SCRIPT_NAME /mcp;
-       fastcgi_buffering  off;
-   }
-
-.. note::
-
-   The FastCGI socket must be reachable and writable by the proxy, and by
-   nobody else. It is the only authentication boundary below the API key.
+A complete lighttpd configuration and a systemd unit that supervises it are
+provided in ``contrib/lighttpd/sysrepo-mcp.conf`` and
+``contrib/systemd/sysrepo-mcp-lighttpd.service``. The listener is bound to
+loopback; terminate TLS at a trusted reverse proxy. The FastCGI socket is
+created under ``/run/sysrepo-mcp`` and must remain private to the service and
+proxy accounts.
 
 sysrepo usage
 -------------

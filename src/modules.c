@@ -53,7 +53,7 @@ tool_sr_list_modules(struct tool_ctx *ctx, struct json_object *args,
 	while ((mod = ly_ctx_get_module_iter(ly, &index))) {
 		struct json_object *entry;
 		struct json_object *features;
-		size_t feature_index;
+		LY_ARRAY_COUNT_TYPE feature_index;
 
 		if (implemented_only && !mod->implemented)
 			continue;
@@ -76,9 +76,7 @@ tool_sr_list_modules(struct tool_ctx *ctx, struct json_object *args,
 		                               mod->implemented ? 1 : 0));
 		features = json_object_new_array();
 		if (mod->compiled && mod->compiled->features) {
-			for (feature_index = 0;
-			     mod->compiled->features[feature_index];
-			     feature_index++) {
+			LY_ARRAY_FOR(mod->compiled->features, feature_index) {
 				json_object_array_add(features,
 					json_object_new_string(
 						mod->compiled->features[feature_index]));

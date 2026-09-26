@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: LGPL-3.0-only
+#
+# Runs lighttpd as the FastCGI supervisor. sysrepo-mcp is spawned by
+# lighttpd's bin-path and receives the listening socket on descriptor 0.
+
+[Unit]
+Description=sysrepo-mcp FastCGI service (lighttpd)
+After=network.target
+
+[Service]
+Type=simple
+User=sysrepo-mcp
+Group=sysrepo
+RuntimeDirectory=sysrepo-mcp
+RuntimeDirectoryMode=0750
+LogsDirectory=sysrepo-mcp
+LogsDirectoryMode=0750
+UMask=0007
+ExecStartPre=/usr/sbin/lighttpd -tt -f /etc/sysrepo-mcp/lighttpd.conf
+ExecStart=/usr/sbin/lighttpd -D -f /etc/sysrepo-mcp/lighttpd.conf
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/etc/sysrepo /dev/shm /run/sysrepo-mcp /var/log/sysrepo-mcp
+
+[Install]
+WantedBy=multi-user.target

@@ -143,155 +143,78 @@ Doxygen extracts the public headers of ``include/`` into
 ``sphinx/_doxygen/xml``; ``sphinx/conf.py`` enables Breathe only when that
 directory exists, so ``sphinx-build`` also works without running Doxygen first.
 
-Configuration Options
----------------------
+Configuration
+-------------
 
-All options below are declared in ``config.in`` (Kconfig format) and are fixed
-at compile time. Runtime configuration, namely the API keys, lives in the
-``sysrepo-mcp`` YANG module (see :doc:`architecture`).
+Kconfig contains only build-time choices. The runtime settings live in the
+libconfig file, ``/etc/sysrepo-mcp/sysrepo-mcp.conf`` by default.
 
-In the generated header, every symbol is prefixed with ``CONFIG_``; for
-instance ``server.log.level`` is used from C as
-``CONFIG_server.log.level``.
-
-Sessions and notifications
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 15 45
-
-   * - Option
-     - Default
-     - Description
-   * - ``SYSREPO_MCP_SERVER_MAX_SESSIONS``
-     - ``64``
-     - Concurrent MCP sessions (1-1024). Past it, ``initialize`` returns
-       HTTP 503.
-   * - ``SYSREPO_MCP_SERVER_SESSION_TTL``
-     - ``1800``
-     - Seconds of inactivity before a session, its subscriptions and its
-       queued notifications are destroyed (60-86400).
-   * - ``SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE``
-     - ``256``
-     - Notifications buffered per session between two polls (8-65536).
-
-.. warning::
-
-   These are build-time because the session store is a fixed array in the
-   process. That also means the FastCGI configuration **must** use
-   ``max-procs = 1``: with more, a session created by one worker is invisible
-   to the next request. See :doc:`architecture`.
-
-FastCGI transport
-~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 15 45
-
-   * - Option
-     - Default
-     - Description
-   * - ``SYSREPO_MCP_SERVER_TRANSPORT_UNIX``
-     - ``y``
-     - Listen on a Unix socket. Mutually exclusive with the TCP choice.
-   * - ``SYSREPO_MCP_SERVER_TRANSPORT_TCP``
-     - ``n``
-     - Listen on a TCP socket instead.
-   * - ``SYSREPO_MCP_SERVER_UNIX_SOCKET_PATH``
-     - ``/var/run/sysrepo-mcp.sock``
-     - Socket path, when the Unix transport is selected.
-   * - ``SYSREPO_MCP_SERVER_TCP_HOST``
-     - ``127.0.0.1``
-     - Bind address, when the TCP transport is selected.
-   * - ``SYSREPO_MCP_SERVER_TCP_PORT``
-     - ``8080``
-     - Bind port (1-65535), when the TCP transport is selected.
-
-.. note::
-
-   These options describe where the server listens for *FastCGI* connections
-   coming from the reverse proxy. They are not an HTTP listener: HTTP is
-   terminated by the proxy.
-
-   When the proxy spawns the server itself (lighttpd ``bin-path``), the socket
-   is handed over on descriptor 0 and these options are unused.
-
-Access control
-~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 15 45
-
-   * - Option
-     - Default
-     - Description
-   * - ``SYSREPO_MCP_SERVER_ACL_ENABLED``
-     - ``y``
-     - Master switch for authentication and NACM.
-   * - ``SYSREPO_MCP_SERVER_AUTH_BEARER``
-     - ``y``
-     - Read the credential from ``Authorization: Bearer <key>``.
-   * - ``SYSREPO_MCP_SERVER_AUTH_COOKIE``
-     - ``n``
-     - Read the credential from a cookie instead.
-   * - ``SYSREPO_MCP_SERVER_COOKIE_NAME``
-     - ``mcp_session``
-     - Cookie name, when the cookie credential is selected.
-   * - ``SYSREPO_MCP_SERVER_ACL_ENABLE_NACM``
-     - ``y``
-     - Bind the session to a NACM user (``sr_nacm_set_user()``).
-   * - ``SYSREPO_MCP_SERVER_ACL_ENABLE_MODULE_FILTER``
-     - ``y``
-     - Restrict the reachable YANG modules.
-   * - ``SYSREPO_MCP_SERVER_ACL_ENABLE_OPERATION_FILTER``
-     - ``n``
-     - Distinguish read from write when filtering.
-   * - ``SYSREPO_MCP_SERVER_ACL_ENABLE_WRITE_PROTECTION``
-     - ``n``
-     - Refuse every write on the modules flagged as sensitive.
-   * - ``SYSREPO_MCP_SERVER_ACL_ALLOWED_MODULES``
-     - ``""``
-     - Comma-separated module allow-list; empty means every module.
-
-.. warning::
-
-   None of the access control options are enforced yet. Building with
-   ``SYSREPO_MCP_SERVER_ACL_ENABLED=y`` currently grants an agent the same
-   rights as the user the server runs as.
-
-sysrepo repository
+Build-time options
 ~~~~~~~~~~~~~~~~~~
 
 .. list-table::
    :header-rows: 1
-   :widths: 40 15 45
+   :widths: 40 20 40
 
    * - Option
      - Default
      - Description
    * - ``SYSREPO_MCP_SERVER_SYSREPO_DATASTORE_DIR``
      - ``/etc/sysrepo``
-     - Repository directory used by the linked sysrepo library.
+     - Repository path exported through ``SYSREPO_REPOSITORY_PATH``.
+   * - ``SYSREPO_MCP_SERVER_SESSION_ID_LEN``
+     - ``32``
+     - Session identifier length in hexadecimal characters.
 
-.. note::
+Session and schema settings
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   sysrepo resolves its repository path at *its own* compile time
-   (``-DREPO_PATH``), and honours the ``SYSREPO_REPOSITORY_PATH`` environment
-   variable at runtime. This option only controls what sysrepo-mcp exports in
-   that variable before connecting; it cannot move a repository that sysrepo
-   was built to use elsewhere.
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20 40
+
+   * - libconfig setting
+     - Default
+     - Description
+   * - ``server.session.max_sessions``
+     - ``64``
+     - Concurrent MCP sessions (1-1024).
+   * - ``server.session.ttl``
+     - ``1800``
+     - Idle expiry in seconds (60-86400).
+   * - ``server.session.notif_queue_size``
+     - ``256``
+     - Notifications buffered per session (8-65536).
+   * - ``server.session.default_timeout_ms``
+     - ``5000``
+     - Default timeout for sysrepo operations (100-60000).
+   * - ``server.session.max_tree_depth``
+     - ``32``
+     - Hard schema traversal limit (1-256).
+
+The session store is process-local, so the lighttpd configuration must use
+``max-procs = 1``.
+
+Authentication
+~~~~~~~~~~~~~
+
+The ``server.auth`` group accepts ``method`` (``none``, ``bearer`` or
+``cookie``; default ``none``), ``cookie_name`` (default ``mcp_session``), and
+``api_keys``. Each key entry is an object with a ``key`` and a sysrepo NACM
+``user``. Authentication and NACM identity binding are active when
+``method`` is ``bearer`` or ``cookie``. With ``method = "none"``, requests
+run with the operating-system identity of the FastCGI process. Bearer or
+cookie mode requires a configured key; missing or invalid credentials are
+rejected.
 
 Logging
 ~~~~~~~
 
 .. list-table::
    :header-rows: 1
-   :widths: 40 15 45
+   :widths: 40 20 40
 
-   * - Option
+   * - libconfig setting
      - Default
      - Description
    * - ``server.log.syslog_enabled``
@@ -299,22 +222,29 @@ Logging
      - Log to syslog through elog.
    * - ``server.log.file``
      - ``/var/log/sysrepo-mcp.log``
-     - Append-only file log path; can be enabled together with syslog and console.
+     - Append-only file log path; can be combined with other back ends.
    * - ``server.log.level``
      - ``6``
      - Syslog severity, 0 (emerg) to 7 (debug).
    * - ``server.log.verbose``
      - ``false``
-     - Extra debugging output.
+     - Enable debug severity unless ``--log-level`` is supplied.
    * - ``server.log.console``
      - ``true``
      - Also log to ``stderr``.
 
-.. warning::
+Under FastCGI, ``stderr`` is captured by the web server or systemd. Configure
+syslog or a writable file path for persistent application logs.
 
-   Under FastCGI, ``stderr`` is captured by the web server and ends up in its
-   error log. Console logging is therefore only useful when the process is
-   started by the proxy; it is not a substitute for syslog.
+FastCGI transport
+~~~~~~~~~~~~~~~~~
+
+The application currently relies on lighttpd spawning it with ``bin-path``
+and passing the listener on descriptor 0. Set ``max-procs`` to 1. A complete
+configuration is provided at ``contrib/lighttpd/sysrepo-mcp.conf``; the
+matching systemd unit starts lighttpd as the supervisor. There is no
+standalone Unix or TCP listener in the current implementation, so the
+transport socket fields formerly shown here did not have an effect.
 
 Usage
 -----
@@ -329,7 +259,19 @@ and exits. ``--log-level`` accepts elog severities ``emerg``, ``alert``,
 the libconfig threshold. With no argument the process expects to be started
 as a FastCGI application by a web server and exits with an error otherwise.
 
-See :doc:`architecture` for the reverse proxy configuration.
+See :doc:`architecture` for the FastCGI deployment model. A lighttpd
+configuration and matching systemd unit are included under ``contrib/``. The
+unit runs lighttpd as ``sysrepo-mcp``; create that account, grant it the
+permissions needed to access the sysrepo repository, and adjust ``Group`` to
+the group used by the local sysrepo installation. Configure API keys and NACM
+rules before enabling the service. Set ``server.log.file`` in the runtime
+configuration to ``/var/log/sysrepo-mcp/sysrepo-mcp.log`` (or another path the
+service account can write).
+
+Install the example files as ``/etc/sysrepo-mcp/lighttpd.conf`` and
+``/etc/systemd/system/sysrepo-mcp-lighttpd.service``, then run
+``systemctl daemon-reload`` and enable the unit. It binds only to loopback on
+port 8080; place a TLS reverse proxy in front of it for remote clients.
 
 Dependencies
 ------------

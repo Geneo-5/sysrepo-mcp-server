@@ -199,7 +199,7 @@ def test_schema_of_the_project_module_is_introspectable(mcp_module):
 
     assert module["namespace"] == "urn:sysrepo-mcp:test"
     assert roots["api-key"]["type"] == "list"
-    assert roots["api-key"]["children"]["server-state"]["config"] is False
+    assert roots["server-state"]["config"] is False
 
 
 def test_schema_describes_a_project_module_leaf(mcp_module):

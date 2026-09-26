@@ -16,7 +16,6 @@
 #include <elog/elog.h>
 #include <sysrepo.h>
 
-#include <sysrepo/mcp/config.h>
 #include <sysrepo/mcp/libconfig.h>
 #include <sysrepo/mcp/log.h>
 

@@ -163,7 +163,7 @@ tree_node_callback(struct json_object *obj, const struct lysc_node *node,
 		}
 		json_object_object_add(obj, "min-elements",
 		                       json_object_new_int64(min));
-		if (max)
+		if (max && max != UINT32_MAX)
 			json_object_object_add(obj, "max-elements",
 			                       json_object_new_int64(max));
 		else

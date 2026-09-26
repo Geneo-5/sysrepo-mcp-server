@@ -78,14 +78,9 @@ SOURCE_BROWSER         = NO
 
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
-EXPAND_ONLY_PREDEFINED = YES
 
-PREDEFINED             = CONFIG_SYSREPO_MCP_SERVER_ACL_ENABLED=1 \
-                         CONFIG_SYSREPO_MCP_SERVER_ACL_ENABLE_NACM=1 \
-                         CONFIG_SYSREPO_MCP_SERVER_AUTH_BEARER=1 \
-                         CONFIG_SYSREPO_MCP_SERVER_SYSLOG_ENABLED=1 \
-                         CONFIG_SYSREPO_MCP_SERVER_LOG_VERBOSE=0 \
-                         CONFIG_SYSREPO_MCP_SERVER_TRANSPORT_UNIX=1
+PREDEFINED             = CONFIG_SYSREPO_MCP_SERVER_SESSION_ID_LEN=32 \
+                         CONFIG_SYSREPO_MCP_SERVER_SYSREPO_DATASTORE_DIR=\"/etc/sysrepo\"
 
 ################################################################################
 # Diagnostics
