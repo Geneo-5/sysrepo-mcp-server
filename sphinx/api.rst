@@ -1249,8 +1249,12 @@ sr_module_uninstall
 sr_list_modules
 ~~~~~~~~~~~~~~~
 
-*Status: implemented.* Enumerates the modules in the libyang context, which is
-how an agent discovers what it may address before calling ``get_schema``.
+*Status: implemented.* Enumerates the modules in the libyang context. This is
+the first tool an agent should call to explore what modules and XPath
+resources are available before invoking any other tool: it returns every
+implemented module with all of its root data nodes, RPC, actions and
+notifications, so the agent knows exactly which ``/module:name`` paths it can
+address.
 
 **Arguments**
 

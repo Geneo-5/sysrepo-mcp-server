@@ -231,9 +231,18 @@ def test_list_modules_describes_each_one(mcp_oven):
 
     assert oven["revision"] == "2018-01-19"
     assert oven["namespace"] == "urn:sysrepo:oven"
-    assert oven["prefix"] == "ov"
     assert oven["implemented"] is True
     assert oven["features"] == []
+
+    expected = [
+        "/oven:oven",
+        "/oven:oven-state",
+        "/oven:insert-food",
+        "/oven:remove-food",
+        "/oven:oven-ready",
+    ]
+    for xpath in expected:
+        assert xpath in oven["entries"], f"expected {xpath!r} in {oven['entries']!r}"
 
 
 def test_list_modules_can_include_imported_ones(mcp_oven):

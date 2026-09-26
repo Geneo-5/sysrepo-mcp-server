@@ -24,7 +24,8 @@
  *
  * List all YANG modules known to the datastore (or only the implemented ones
  * when `implemented_only` is true). Each entry carries name, revision,
- * namespace, prefix, and whether it is implemented.
+ * namespace, the set of root XPaths for the module, and whether it is
+ * implemented.
  */
 
 struct json_object *
@@ -35,6 +36,8 @@ tool_sr_list_modules(struct tool_ctx *ctx, struct json_object *args,
 	const struct lys_module *mod;
 	struct json_object      *res;
 	struct json_object      *list;
+	struct json_object      *entries;
+	const struct lysc_node *node;
 	uint32_t                 index = 0;
 	int                      implemented_only =
 		arg_bool(args, "implemented_only", 1);
@@ -54,6 +57,7 @@ tool_sr_list_modules(struct tool_ctx *ctx, struct json_object *args,
 		struct json_object *entry;
 		struct json_object *features;
 		LY_ARRAY_COUNT_TYPE feature_index;
+		char path[1024];
 
 		if (implemented_only && !mod->implemented)
 			continue;
@@ -63,17 +67,48 @@ tool_sr_list_modules(struct tool_ctx *ctx, struct json_object *args,
 		                       json_object_new_string(mod->name));
 		json_object_object_add(entry, "revision",
 		                       json_object_new_string(
-		                               mod->revision ?
-		                               mod->revision : ""));
+			                       mod->revision ?
+			                       mod->revision : ""));
 		json_object_object_add(entry, "namespace",
 		                       json_object_new_string(
-		                               mod->ns ? mod->ns : ""));
-		json_object_object_add(entry, "prefix",
-		                       json_object_new_string(
-		                               mod->prefix ? mod->prefix : ""));
+			                       mod->ns ? mod->ns : ""));
 		json_object_object_add(entry, "implemented",
 		                       json_object_new_boolean(
-		                               mod->implemented ? 1 : 0));
+			                       mod->implemented ? 1 : 0));
+
+		/* Build the list of root XPaths for this module. */
+		entries = json_object_new_array();
+		if (mod->compiled) {
+			for (node = (const struct lysc_node *)mod->compiled->data;
+			     node; node = node->next) {
+				if (mod->name && node->name)
+					snprintf(path, sizeof(path), "/%s:%s",
+					         mod->name, node->name);
+				else if (mod->name)
+					snprintf(path, sizeof(path), "/%s",
+					         mod->name);
+				else
+					continue;
+				json_object_array_add(entries,
+				                       json_object_new_string(path));
+			}
+			for (node = (const struct lysc_node *)mod->compiled->rpcs;
+			     node; node = node->next) {
+				snprintf(path, sizeof(path), "/%s:%s",
+				         mod->name, node->name);
+				json_object_array_add(entries,
+				                       json_object_new_string(path));
+			}
+			for (node = (const struct lysc_node *)mod->compiled->notifs;
+			     node; node = node->next) {
+				snprintf(path, sizeof(path), "/%s:%s",
+				         mod->name, node->name);
+				json_object_array_add(entries,
+				                       json_object_new_string(path));
+			}
+		}
+		json_object_object_add(entry, "entries", entries);
+
 		features = json_object_new_array();
 		if (mod->compiled && mod->compiled->features) {
 			LY_ARRAY_FOR(mod->compiled->features, feature_index) {
@@ -113,6 +148,7 @@ tool_sr_module_install(struct tool_ctx *ctx, struct json_object *args,
 	struct json_object *res;
 	const char        **feature_list = NULL;
 	size_t              feature_count = 0;
+	size_t              i;
 	int                 rc;
 
 	(void)ctx;
@@ -129,8 +165,6 @@ tool_sr_module_install(struct tool_ctx *ctx, struct json_object *args,
 	if (arg_object(args, "features") &&
 	    json_object_is_type(arg_object(args, "features"),
 				json_type_array)) {
-		size_t i;
-
 		feature_count =
 			json_object_array_length(arg_object(args, "features"));
 		feature_list = calloc(feature_count + 1, sizeof(*feature_list));
