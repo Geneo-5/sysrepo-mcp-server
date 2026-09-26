@@ -647,12 +647,13 @@ def _load_nacm_config(env: dict[str, str]) -> None:
         tmp_path = tmp.name
 
     try:
+        # sysrepocfg infers the module from the XML root element (<nacm>)
+        # so -m is redundant and rejected as "Redundant parameters".
         proc = subprocess.run(
             [
                 "sysrepocfg",
                 "-l", tmp_path,
                 "-d", "running",
-                "-m", "ietf-netconf-acm",
             ],
             env=env,
             capture_output=True,
