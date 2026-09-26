@@ -616,9 +616,14 @@ _NACM_XML = r"""
 
 def _load_nacm_config(env: dict[str, str]) -> None:
     """Install ietf-netconf-acm module (if not yet installed) and load
-    the NACM XML configuration into the running datastore."""
-    import ctypes.util
-    import sys
+    the NACM XML configuration into the running datastore.
+
+    Uses ``sysrepocfg`` (the sysrepo configuration tool that correctly
+    links libsysrepo + libyang) to import the NACM XML into the running
+    datastore — avoiding ctypes / dual-libyang incompatibility.
+    """
+    import subprocess
+    import tempfile
 
     # Install ietf-netconf-acm module first (sysrepoctl).
     result = _install_module(
@@ -632,96 +637,36 @@ def _load_nacm_config(env: dict[str, str]) -> None:
             f"could not install ietf-netconf-acm.yang:\n{result.output}"
         )
 
-    # Load NACM configuration via sysrepo + libyang APIs.
-    # lyd_parse_data_mem belongs to libyang, not libsysrepo — two
-    # separate CDLL handles are required.
-    libsysrepo_path = ctypes.util.find_library("sysrepo")
-    if libsysrepo_path is None:
-        raise RuntimeError("libsysrepo.so not found in library path")
-    libsysrepo = ctypes.CDLL(libsysrepo_path)
+    # Write the NACM XML to a temp file and import it with sysrepocfg.
+    nacm_xml = _NACM_XML.strip() + "\n"
 
-    libyang_path = ctypes.util.find_library("yang")
-    if libyang_path is None:
-        raise RuntimeError("libyang.so not found in library path")
-    libyang = ctypes.CDLL(libyang_path)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".xml", delete=False
+    ) as tmp:
+        tmp.write(nacm_xml)
+        tmp_path = tmp.name
 
-    # sysrepo calls
-    _sr_connect = libsysrepo.sr_connect
-    _sr_connect.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p)]
-    _sr_connect.restype = ctypes.c_int
-
-    _sr_session_start = libsysrepo.sr_session_start
-    _sr_session_start.argtypes = [
-        ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
-    _sr_session_start.restype = ctypes.c_int
-
-    _sr_acquire_context = libsysrepo.sr_acquire_context
-    _sr_acquire_context.argtypes = [ctypes.c_void_p]
-    _sr_acquire_context.restype = ctypes.c_void_p
-
-    _sr_edit_batch = libsysrepo.sr_edit_batch
-    _sr_edit_batch.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    _sr_edit_batch.restype = ctypes.c_int
-
-    _sr_apply_changes = libsysrepo.sr_apply_changes
-    _sr_apply_changes.argtypes = [ctypes.c_void_p, ctypes.c_int]
-    _sr_apply_changes.restype = ctypes.c_int
-
-    _sr_session_stop = libsysrepo.sr_session_stop
-    _sr_session_stop.argtypes = [ctypes.c_void_p]
-    _sr_session_stop.restype = ctypes.c_int
-
-    _sr_disconnect = libsysrepo.sr_disconnect
-    _sr_disconnect.argtypes = [ctypes.c_void_p]
-    _sr_disconnect.restype = ctypes.c_int
-
-    # libyang call (separate CDLL handle)
-    _lyd_parse_data_mem = libyang.lyd_parse_data_mem
-    _lyd_parse_data_mem.argtypes = [
-        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
-        ctypes.c_int, ctypes.c_void_p]
-    _lyd_parse_data_mem.restype = ctypes.c_int  # LY_ERR (0 = success)
-
-    conn = ctypes.c_void_p()
-    sess = ctypes.c_void_p()
-    ly_ctx = ctypes.c_void_p()
-    tree = ctypes.c_void_p()
-
-    rc = _sr_connect(0, ctypes.byref(conn))
-    if rc:
-        raise RuntimeError(f"sr_connect: {rc}")
-    rc = _sr_session_start(conn, 2, ctypes.byref(sess))  # SR_DS_RUNNING = 2
-    if rc:
-        _sr_disconnect(conn)
-        raise RuntimeError(f"sr_session_start: {rc}")
-    ly_ctx = _sr_acquire_context(conn)
-    if not ly_ctx:
-        _sr_session_stop(sess)
-        _sr_disconnect(conn)
-        raise RuntimeError("sr_acquire_context: NULL")
-
-    rc = _lyd_parse_data_mem(
-        ly_ctx, _NACM_XML.encode("utf-8"), 4, 0, 0, ctypes.byref(tree)
-    )
-    if rc:
-        _sr_session_stop(sess)
-        _sr_disconnect(conn)
-        raise RuntimeError(f"lyd_parse_data_mem: {rc}")
-
-    rc = _sr_edit_batch(sess, tree)
-    if rc:
-        _sr_session_stop(sess)
-        _sr_disconnect(conn)
-        raise RuntimeError(f"sr_edit_batch: {rc}")
-
-    rc = _sr_apply_changes(sess, 0)
-    if rc:
-        _sr_session_stop(sess)
-        _sr_disconnect(conn)
-        raise RuntimeError(f"sr_apply_changes: {rc}")
-
-    _sr_session_stop(sess)
-    _sr_disconnect(conn)
+    try:
+        proc = subprocess.run(
+            [
+                "sysrepocfg",
+                "-l", tmp_path,
+                "-d", "running",
+                "-m", "ietf-netconf-acm",
+                "-o",  # overwrite: replaces current running config
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"sysrepocfg failed (rc={proc.returncode}): "
+                f"{proc.stderr}"
+            )
+    finally:
+        import os
+        os.unlink(tmp_path)
 
 
 @pytest.fixture(scope="session")
