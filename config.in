@@ -7,7 +7,9 @@
 
 # =============================================================================
 # SERVER
-# Configuration options that affect runtime behavior are in yang/sysrepo-mcp.yang
+# Configuration options that affect runtime behavior are in the libconfig
+# file (docker/sysrepo-mcp.conf by default), parsed at startup by
+# src/libconfig.c. Only build-time toggles belong here.
 # =============================================================================
 
 config PACKAGE_NAME
@@ -25,7 +27,7 @@ config PACKAGE_VERSION
 # sysrepo daemon since version 2, so there is no daemon socket to configure.
 # The repository holds the YANG modules and the startup datastore; the running
 # datastore lives in POSIX shared memory, not in a file.
-# Runtime options are in yang/sysrepo-mcp.yang
+# Runtime options are in the libconfig file, not in this Kconfig tree.
 # =============================================================================
 
 config SYSREPO_MCP_SERVER_SYSREPO_DATASTORE_DIR

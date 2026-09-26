@@ -294,9 +294,9 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 			return;
 		}
 
-		/* NACM: set the user on the newly created sysrepo session.
-		 * sr_nacm_check_operation() is called in each handler;
-		 * deferred to a follow-up commit. */
+		/* NACM : lier l'identité à la session via
+		 * ``sr_nacm_set_user()`` ; le contrôle d'accès se fait dans
+		 * ``rpc_common()`` en ``rpc.c`` avant ``sr_rpc_send_tree()``. */
 		if (cfg->auth_method > 0 && mcp->user) {
 			rc = sr_nacm_set_user(ctx.sess, mcp->user);
 			if (rc != SR_ERR_OK) {

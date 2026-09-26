@@ -72,25 +72,42 @@ lifting ``max-procs = 1``.
 Findings from this review (not yet triaged into a priority)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- ``sphinx/api.rst``'s JSON-RPC error code table (``-32001``
-  Unauthenticated … ``-32008`` Session required) does not match
-  ``include/sysrepo/mcp/utilities.h``, where ``MCP_ERR_NOT_FOUND`` is
-  ``-32001``, ``MCP_ERR_VALIDATION`` is ``-32002``, ``MCP_ERR_DENIED`` is
-  ``-32003``, ``MCP_ERR_LOCKED`` is ``-32004``, ``MCP_ERR_TIMEOUT`` is
-  ``-32005`` and ``MCP_ERR_UNSUPPORTED`` is ``-32006``. Confirmed against
-  ``tests/test_schema.py``, which asserts ``-32001`` for a not-found node:
-  the code, not the doc, is what the tests were written against.
-  ``api.rst``'s error table needs rewriting from ``utilities.h``, and
-  ``-32007`` is currently unused in the header — either give it a meaning
-  or drop it from the doc.
 - ``config.in``'s top-of-file comment ("Configuration options that affect
-  runtime behavior are in ``yang/sysrepo-mcp.yang``") still refers to the
-  module P1.1 removed; it should point at the libconfig file instead.
-- ``README.md``'s "État du projet" callout still lists authentication and
-  NACM as missing, which contradicts both this page (P0 marked done) and
-  ``sphinx/architecture.rst`` ("fully enforced"). Settle this only once the
-  NACM gap in P0.10 below is resolved, since right now none of the three
-  is entirely accurate.
+  runtime behavior are in ``yang/sysrepo-mcp.yang``") referred to the module
+  P1.1 removed. Fixed: both occurrences now point at the libconfig file.
+- ``README.md``'s "État du projet" callout still listed authentication and
+  NACM as missing, which contradicted both this page (P0 marked done) and
+  ``sphinx/architecture.rst`` ("fully enforced"). P0.10 is now resolved, so
+  this has been settled: ``README.md``, ``AGENTS.md`` and ``sphinx/api.rst``
+  updated to match the code.
+- **P0.3 ("Store keys hashed") is marked done above but the code does not do
+  it.** ``load_auth()`` in ``src/libconfig.c`` copies ``key`` straight from
+  the libconfig file with ``xstrdup()`` into ``struct mcp_api_key.key``
+  (``include/sysrepo/mcp/libconfig.h``); ``mcp_config_find_key()`` compares
+  it byte-by-byte against the presented credential, which does resist a
+  timing attack, but the key sits in cleartext in the config file and in the
+  process's memory the whole time. Either re-open P0.3 (hash at load time,
+  compare against the hash) or reword it to describe what is actually
+  implemented (byte-by-byte comparison, not hashing) — the strikethrough
+  currently overstates the security property to a reader who has not read
+  the source.
+- ``sphinx/api.rst``'s error-code documentation (implementation-defined
+  range and the sysrepo mapping table) did not match
+  ``include/sysrepo/mcp/utilities.h`` at all — the codes were entirely
+  transposed. Fixed. One remaining gap surfaced while fixing it: a missing
+  or unknown API key is reported as ``-32603`` (Internal error) with HTTP
+  401, in both ``method_initialize()`` and ``serve()`` in ``transport.c``.
+  ``-32603`` is meant for unexpected server-side failure, not a client
+  authentication problem; ``-32007`` is unused and would be a natural home
+  for it, but this needs an explicit decision (and a test) before changing
+  the wire contract.
+- ``sphinx/architecture.rst`` is the most out of date of the three docs:
+  its own "Authentication" section still says "Not implemented" and
+  describes looking the key up in a removed YANG module
+  (``/sysrepo-mcp:api-key``), and "Configuration model" still lists the API
+  key list as living in ``yang/sysrepo-mcp.yang``. Both contradict the
+  chapter's own opening warning, which already says authentication is
+  implemented. Needs the same reconciliation pass as the other three docs.
 
 P0 — Security (blocks any untrusted deployment)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -128,7 +145,7 @@ P0 — Security (blocks any untrusted deployment)
 9. ~~Cover authentication and NACM with tests once they exist. Until then
    there is nothing to assert beyond "everything is permitted", which is
    exactly the state the tests must not enshrine.~~
-10. **Reopened by this review.** ``sr_nacm_check_operation()`` is not
+10. ~~Reopened by this review. ``sr_nacm_check_operation()`` is not
     called anywhere in the source tree. ``sr_nacm_set_user()`` is set on
     the session (item 6), so sysrepo's own data-level enforcement covers
     ``sr_get_config``/``sr_edit_config``/``sr_delete_config``, but
@@ -141,7 +158,11 @@ P0 — Security (blocks any untrusted deployment)
     ``sr_nacm_check_operation()`` call in ``rpc_common()`` before
     ``sr_rpc_send_tree()``, and a test asserting a NACM-denied user gets
     ``-32003`` on an RPC it may not call. Item 4 above should not be read
-    as covering this case.
+    as covering this case.~~ (Done: ``sr_nacm_init()`` au démarrage dans
+    ``sysrepo_open()``, ``sr_nacm_check_operation()`` dans
+    ``rpc_common()`` avant ``sr_rpc_send_tree()``,
+    ``sr_nacm_destroy()`` à l'arrêt dans ``sysrepo_close()``,
+    test ``test_nacm_denied_rpc()``.)
 
 P1 — Configuration: drop the YANG module, adopt libconfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

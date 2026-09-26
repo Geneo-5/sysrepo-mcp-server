@@ -20,6 +20,7 @@
 #include <json-c/json.h>
 
 #include <sysrepo.h>
+#include <sysrepo/netconf_acm.h>
 #include <fcgiapp.h>
 
 #include <sysrepo/mcp/utilities.h>
@@ -43,6 +44,7 @@
 
 sr_conn_ctx_t         *g_conn;
 static const struct ly_ctx  *ly_ctx;
+static sr_subscription_ctx_t *g_nacm_sub;
 time_t                 g_start_time;
 volatile sig_atomic_t stopping;
 
@@ -264,6 +266,7 @@ static int
 sysrepo_open(void)
 {
 	int rc;
+	sr_session_ctx_t *sess;
 
 	if ((rc = sr_connect(0, &g_conn)) != SR_ERR_OK) {
 		fprintf(stderr, CONFIG_PACKAGE_NAME ": sr_connect: %s\n",
@@ -277,6 +280,22 @@ sysrepo_open(void)
 		g_conn = NULL;
 		return -1;
 	}
+
+	/* NACM : initialiser le contrôle d'accès une fois pour toutes les sessions. */
+
+	g_nacm_sub = NULL;
+
+	rc = sr_session_start(g_conn, SR_DS_RUNNING, &sess);
+	if (rc == SR_ERR_OK)
+		rc = sr_nacm_init(sess, 0, &g_nacm_sub);
+	if (rc != SR_ERR_OK) {
+		if (sess)
+			sr_session_stop(sess);
+		fprintf(stderr, CONFIG_PACKAGE_NAME
+			": warning: sr_nacm_init: %s (NACM disabled)\n",
+			sr_strerror(rc));
+	}
+
 	return SR_ERR_OK;
 }
 
@@ -284,6 +303,7 @@ static void
 sysrepo_close(void)
 {
 	if (g_conn) {
+		sr_nacm_destroy();
 		sr_release_context(g_conn);
 		sr_disconnect(g_conn);
 		g_conn = NULL;

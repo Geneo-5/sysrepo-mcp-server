@@ -228,3 +228,19 @@ def test_session_reuse_preserves_user(mcp_auth: McpClient) -> None:
     payload = response2.json()
 
     assert "result" in payload
+
+
+def test_nacm_denied_rpc(mcp_auth: McpClient) -> None:
+    """
+    ``viewer`` est un utilisateur NACM avec droits de lecture uniquement.
+    Un appel à ``sr_execute_rpc`` vers un RPC d'écriture du module ``oven``
+    est refusé avec ``-32003`` par NACM (``sphinx/todo.rst`` P0.10).
+    """
+    session = mcp_auth.open_session_with_token("test-ro-key-0001")
+
+    err = session.tool_error("sr_execute_rpc",
+    {
+        "xpath": "/oven:insert-food",
+        "input": {"time": "now"},
+    })
+    assert err["code"] == MCP_ERR_DENIED

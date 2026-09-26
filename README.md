@@ -8,17 +8,21 @@ actions, and explore YANG schemas.
 > **Project status.** The server is functional: FastCGI transport, the MCP
 > lifecycle, sessions (`Mcp-Session-Id`), configuration tools, RPC, actions,
 > notifications, module management and schema introspection. Authentication
-> (API keys) and NACM are wired in, but per-operation authorization is not
-> yet enforced on RPCs and actions — see `sphinx/todo.rst`, P0.10. Still
-> missing: elog, and a shared session store. The detailed roadmap, which is
+> (API keys from the libconfig file, compared byte-by-byte to resist timing
+> attacks — **not currently hashed at rest**, see `sphinx/todo.rst` findings)
+> and NACM are wired in and enforced on every operation, including RPCs and
+> actions
+> (`sr_nacm_check_operation()` in `rpc_common()`) — P0 in `sphinx/todo.rst`
+> is complete. Still missing: elog (still `fprintf(stderr)`), and a shared
+> session store (`max-procs` must stay 1). The detailed roadmap, which is
 > authoritative on the real state of the code, is in
 > [`sphinx/todo.rst`](sphinx/todo.rst).
 
-> **Do not expose this version to an untrusted agent** without reading
-> `sphinx/todo.rst`, P0.10, first. Datastore reads and writes go through
-> sysrepo's NACM once authentication is configured, but RPCs and actions are
-> not checked against NACM before being invoked: an authenticated agent can
-> currently call any RPC or action of any installed module.
+> **Access control is only as good as the deployment config.** With no API
+> keys configured, every request is served with the rights of the system
+> user running the server. Configure `auth.api_keys[]` in the libconfig file
+> and NACM rules for each identity before exposing this to an agent you do
+> not fully trust.
 
 > **`max-procs` must be 1.** A session, its notification subscriptions and
 > its queue live in the FastCGI process that created it. With more than one
@@ -39,9 +43,11 @@ actions, and explore YANG schemas.
 - **Introspection**: explore a schema (`get_tree`) and document a node
   (`get_help`), so an agent can build valid XPaths without reading the YANG
   source.
-- **Security**: an API key per agent, bound to a NACM user, and logging of
-  every configuration change. RPC/action-level authorization is still open —
-  see the project status above.
+- **Security**: an API key per agent, bound to a NACM user, with every
+  operation — datastore reads/writes, RPCs and actions — checked against
+  NACM, plus a module allow-list, an operation filter and write protection
+  in front of sysrepo. Logging of every configuration change with the
+  identity that made it.
 
 ## Architecture
 

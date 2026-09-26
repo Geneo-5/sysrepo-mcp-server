@@ -475,6 +475,9 @@ _IETF_NACM_YANG = (
 
 _NACM_XML = r"""
 <nacm xmlns="urn:ietf:params:xml:ns:yang:ietf-netconf-acm">
+  <enable-nacm>true</enable-nacm>
+  <read-default>permit</read-default>
+  <write-default>deny</write-default>
   <exec-default>deny</exec-default>
   <enable-external-groups>false</enable-external-groups>
   <groups>
@@ -523,20 +526,6 @@ _NACM_XML = r"""
       <action>permit</action>
     </rule>
     <rule>
-      <name>sysrepo-mcp-api-key-write</name>
-      <module-name>sysrepo-mcp</module-name>
-      <path>/sysrepo-mcp:sysrepo-mcp-test/api-key</path>
-      <access-operations>create update delete</access-operations>
-      <action>permit</action>
-    </rule>
-    <rule>
-      <name>sysrepo-mcp-server-state</name>
-      <module-name>sysrepo-mcp</module-name>
-      <path>/sysrepo-mcp:sysrepo-mcp-test/server-state</path>
-      <access-operations>read</access-operations>
-      <action>permit</action>
-    </rule>
-    <rule>
       <name>sysrepo-mcp-status</name>
       <module-name>sysrepo-mcp</module-name>
       <rpc-name>get_status</rpc-name>
@@ -561,12 +550,6 @@ _NACM_XML = r"""
       <module-name>oven</module-name>
       <rpc-name>insert-food</rpc-name>
       <access-operations>exec</access-operations>
-      <action>permit</action>
-    </rule>
-    <rule>
-      <name>sysrepo-mcp-test-read</name>
-      <module-name>sysrepo-mcp-test</module-name>
-      <access-operations>read</access-operations>
       <action>permit</action>
     </rule>
   </rule-list>
@@ -603,37 +586,41 @@ _NACM_XML = r"""
       <access-operations>exec</access-operations>
       <action>deny</action>
     </rule>
-    <rule>
-      <name>sysrepo-mcp-test-read</name>
-      <module-name>sysrepo-mcp-test</module-name>
-      <access-operations>read</access-operations>
-      <action>permit</action>
-    </rule>
   </rule-list>
 </nacm>
 """
 
 
-def _load_nacm_config(env: dict[str, str]) -> None:
-    """Install ietf-netconf-acm module (if not yet installed) and load
-    the NACM XML configuration into the running datastore.
-
-    Uses ``sysrepocfg`` (the sysrepo configuration tool that correctly
-    links libsysrepo + libyang) to import the NACM XML into the running
-    datastore — avoiding ctypes / dual-libyang incompatibility.
+@pytest.fixture(scope="session")
+def nacm_config(auth_sysrepo_env: dict[str, str]) -> dict[str, str]:
     """
+    Pre-test fixture: install ietf-netconf-acm module and load NACM rules
+    into the running datastore BEFORE the server starts.
+
+    This ensures that when sysrepo-mcp connects to sysrepo, the NACM
+    configuration is already present and active. Without this, the server
+    might cache an empty NACM config at startup and never see the rules
+    loaded afterwards.
+
+    The fixture depends on auth_sysrepo_env to get the isolated repository
+    path, and returns it unchanged so downstream fixtures can use it.
+    """
+    if not auth_sysrepo_env:
+        # sysrepoctl not available, skip NACM setup
+        return auth_sysrepo_env
+
     import subprocess
     import tempfile
 
     # Install ietf-netconf-acm module first (sysrepoctl).
     result = _install_module(
-        env,
+        auth_sysrepo_env,
         "ietf-netconf-acm",
         _IETF_NACM_YANG,
         [_IETF_NACM_YANG.parent],
     )
     if not result.installed:
-        raise RuntimeError(
+        pytest.fail(
             f"could not install ietf-netconf-acm.yang:\n{result.output}"
         )
 
@@ -652,21 +639,45 @@ def _load_nacm_config(env: dict[str, str]) -> None:
         proc = subprocess.run(
             [
                 "sysrepocfg",
-                "-l", tmp_path,
+                "--import=" + tmp_path,
                 "-d", "running",
             ],
-            env=env,
+            env=auth_sysrepo_env,
             capture_output=True,
             text=True,
         )
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"sysrepocfg failed (rc={proc.returncode}): "
+            pytest.fail(
+                f"sysrepocfg failed to load NACM config (rc={proc.returncode}): "
                 f"{proc.stderr}"
             )
     finally:
         import os
         os.unlink(tmp_path)
+
+    # Verify that NACM is actually enabled by reading it back
+    proc = subprocess.run(
+        [
+            "sysrepocfg",
+            "-X",
+            "-d", "running",
+            "-m", "ietf-netconf-acm",
+        ],
+        env=auth_sysrepo_env,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 0:
+        if "<enable-nacm>true</enable-nacm>" not in proc.stdout:
+            pytest.fail(
+                f"NACM is not enabled after loading config.\n"
+                f"Exported config:\n{proc.stdout}"
+            )
+    else:
+        # Non-fatal: we can't verify, but the load succeeded above
+        pass
+
+    return auth_sysrepo_env
 
 
 @pytest.fixture(scope="session")
@@ -933,7 +944,7 @@ def oven_session(mcp_oven: McpClient) -> McpClient:
 
 @pytest.fixture
 def mcp_auth(
-    auth_sysrepo_env: dict[str, str],
+    nacm_config: dict[str, str],
     tmp_path_factory: pytest.TempPathFactory,
 ) -> McpClient:
     """
@@ -948,7 +959,11 @@ def mcp_auth(
     sysrepo rwlock in /dev/shm.  When it is not available (empty dict, because
     sysrepoctl is missing) the fixture returns a session-less client: tests
     that need auth will get a 401/404 rather than a server error.
+
+    The *nacm_config* fixture ensures that NACM permissions are installed
+    BEFORE the server starts, so the server sees the rules immediately.
     """
+    auth_sysrepo_env = nacm_config
     if not auth_sysrepo_env:
         # sysrepoctl not available — return a dead client so all auth tests
         # fail early rather than hanging.
@@ -1050,15 +1065,8 @@ def mcp_auth(
     if proc.stderr is not None:
         client._print_pipe(proc.stderr, "server stderr")
 
-    # Load NACM configuration: install ietf-netconf-acm module, then write
-    # the rule set into the running datastore so that NACM is enforced.
-    try:
-        _load_nacm_config(auth_sysrepo_env)
-    except RuntimeError as exc:  # pragma: no cover - environment failure
-        output, _ = proc.communicate(timeout=5)
-        if output:
-            print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
-        pytest.fail(f"NACM load failed: {exc}")
+    # NACM configuration is already loaded by the nacm_config fixture
+    # before this server started, so no need to load it here.
 
     yield client
 

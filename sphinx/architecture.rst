@@ -214,29 +214,38 @@ Configuration model
 Configuration is split in two:
 
 **Build time**, in ``config.in`` (Kconfig)
-   Transport, credential type, access control switches, repository path,
-   logging, and the session limits: maximum concurrent sessions, idle TTL and
-   notification queue size. Fixed when the binary is compiled. See
-   :doc:`install`.
+   Only what stays fixed once the binary is compiled: the package name and
+   version, the sysrepo repository path, and the session identifier length.
+   Transport, credential type, access control, logging and the session
+   limits (maximum concurrent sessions, idle TTL, notification queue size)
+   moved to runtime — see below. See :doc:`install`.
 
-**Runtime**, in ``yang/sysrepo-mcp.yang``
-   The API key list, and the server operational state. Read from and written to
-   the sysrepo datastore like any other YANG data, which means it is itself
-   subject to NACM.
+**Runtime**, in the libconfig file (``docker/sysrepo-mcp.conf`` by default)
+   The API key list, session limits, transport and logging settings. Parsed
+   once at startup by ``src/libconfig.c``; there is no YANG module of this
+   project's own installed into sysrepo, and nothing here is subject to
+   NACM (NACM governs the datastore, not this file).
 
 .. note::
 
-   The session limits are build-time today because the session store is
-   build-time: it is a fixed array in the process. Moving sessions to the
-   datastore, which milestone 4 calls for, is what would let an operator
-   change them without recompiling.
+   Session limits are already a runtime libconfig setting
+   (``server.session.max_sessions``/``ttl``/``notif_queue_size``), and the
+   session table itself is allocated dynamically at startup from that value
+   (``sessions_init()``) rather than sized at compile time. What is still
+   fixed by ``max-procs = 1`` is *where* sessions live — one FastCGI
+   process — not how many of them are allowed. Moving the session store
+   itself out of the process and into the datastore, which milestone 4
+   calls for, is what would let sessions survive more than one process.
 
 Authentication
 --------------
 
 .. warning::
 
-   Not implemented. The server currently accepts every request.
+   Implemented, but only as strong as the deployment configuration. With no
+   ``server.auth.api_keys[]`` entries in the libconfig file, ``auth_method``
+   stays ``"none"`` and the server accepts every request with the rights of
+   the system user running it.
 
 Bearer token
 ~~~~~~~~~~~~
@@ -244,8 +253,11 @@ Bearer token
 The recommended mode. The agent sends ``Authorization: Bearer <api-key>``, and
 the proxy forwards it as the ``HTTP_AUTHORIZATION`` FastCGI parameter.
 
-1. The server extracts the key from the header.
-2. It looks the key up in ``/sysrepo-mcp:api-key``.
+1. The server extracts the key from the header (``extract_credential()`` in
+   ``transport.c``).
+2. It looks the key up in the libconfig ``server.auth.api_keys[]`` list
+   (``mcp_config_find_key()``) — no longer ``/sysrepo-mcp:api-key`` in the
+   datastore; that YANG module was removed (see :doc:`todo`, P1).
 3. It resolves the associated NACM user name.
 4. It calls ``sr_nacm_set_user()`` on the sysrepo session, so every subsequent
    operation is evaluated against that user's NACM rules.
@@ -253,11 +265,14 @@ the proxy forwards it as the ``HTTP_AUTHORIZATION`` FastCGI parameter.
 
 .. warning::
 
-   Storing API keys as cleartext leaves in a datastore means any principal with
-   read access to ``/sysrepo-mcp:api-key`` can impersonate every agent. The
-   YANG module therefore marks the list ``nacm:default-deny-all``, and keys
-   should be stored hashed rather than in the clear. Neither the hashing nor
-   the comparison is implemented yet.
+   API keys are held in cleartext, both in the libconfig file on disk and in
+   the server's memory (``struct mcp_api_key.key`` in
+   ``include/sysrepo/mcp/libconfig.h``) — anyone who can read that file or
+   attach to the process can read every key. The comparison in
+   ``mcp_config_find_key()`` is byte-by-byte over the full key length, which
+   resists a timing attack, but that is not the same as hashing at rest.
+   ``sphinx/todo.rst`` currently marks "store keys hashed" as done under P0;
+   it is not, and is tracked as a *Findings from this review* item there.
 
 Cookie
 ~~~~~~
@@ -305,12 +320,12 @@ replacement for NACM rules.
 
 .. warning::
 
-When deployed with API keys configured (``auth.api_keys[]`` in the libconfig
-file), the server enforces authentication at the ``initialize`` step and
-evaluates ACL filters before executing any operation.  Without API keys,
-every request is served with the rights of the system user running the
-FastCGI process.  Do not expose this build to an untrusted agent without
-enabling authentication.
+   When deployed with API keys configured (``server.auth.api_keys[]`` in the
+   libconfig file), the server enforces authentication at the
+   ``initialize`` step and evaluates ACL filters before executing any
+   operation. Without API keys, every request is served with the rights of
+   the system user running the FastCGI process. Do not expose this build to
+   an untrusted agent without enabling authentication.
 
 FastCGI transport
 -----------------
@@ -466,11 +481,14 @@ The tool surface is specified in :doc:`api`. Summarised by area:
      - implemented
      - ``lys_find_path()`` on the session context
    * - ``get_help``
-     - partial
-     - ``lysc_node`` introspection; no ranges or defaults yet
+     - implemented
+     - ``lysc_node`` introspection, including ranges, patterns and defaults
 
 "Partial" means the handler works but does not produce every member the API
-reference documents; what is missing is stated there, tool by tool.
+reference documents; what is missing is stated there, tool by tool. No tool
+is currently in that state — see :doc:`todo`, P2.1 for the next contract
+change planned for ``get_help``/``get_tree``, which is scope work, not a
+gap in what exists today.
 
 Logging
 -------

@@ -253,9 +253,10 @@ Data encoding
    arrays, and a value keeps its YANG type.
 
 Examples
-   The examples use two modules: ``sysrepo-mcp``, this project's own module in
-   ``yang/sysrepo-mcp.yang``, and ``oven``, the example module shipped with
-   sysrepo in ``extern/sysrepo/examples/plugin/oven.yang``.
+   The examples below mostly use ``oven``, the example module shipped with
+   sysrepo in ``extern/sysrepo/examples/plugin/oven.yang``. This project no
+   longer installs a YANG module of its own — API keys and other runtime
+   settings live in a libconfig file instead (see :doc:`todo`, P1).
 
 Tool catalogue
 --------------
@@ -319,8 +320,8 @@ Tool catalogue
      - implemented
      - Explore a YANG schema
    * - ``get_help``
-     - partial
-     - Document one schema node; no ranges or defaults yet
+     - implemented
+     - Document one schema node, including ranges, patterns and defaults
 
 Configuration tools
 -------------------
@@ -359,55 +360,14 @@ sr_get_config
 ``datastore`` (string)
    The datastore that was read.
 
-Reading every API key of this server:
+.. note::
 
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 10,
-       "method": "tools/call",
-       "params": {
-           "name": "sr_get_config",
-           "arguments": {
-               "xpath": "/sysrepo-mcp:api-key",
-               "datastore": "running"
-           }
-       }
-   }
-
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 10,
-       "result": {
-           "data": {
-               "sysrepo-mcp:api-key": [
-                   {"key": "abc123", "user": "admin"},
-                   {"key": "def456", "user": "operator"}
-               ]
-           },
-           "xpath": "/sysrepo-mcp:api-key",
-           "datastore": "running"
-       }
-   }
-
-One list entry, selected by its key:
-
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 11,
-       "method": "tools/call",
-       "params": {
-           "name": "sr_get_config",
-           "arguments": {
-               "xpath": "/sysrepo-mcp:api-key[key='abc123']"
-           }
-       }
-   }
+   API keys are **not** datastore data. They live in the server's own
+   libconfig file (``auth.api_keys[]``), read once at startup — the
+   ``yang/sysrepo-mcp.yang`` module that used to expose
+   ``/sysrepo-mcp:api-key`` was removed (see :doc:`todo`, P1). There is
+   nothing to read or write about API keys through ``sr_get_config`` or
+   ``sr_edit_config``.
 
 The oven configuration container:
 
@@ -530,31 +490,6 @@ Changing only the temperature, leaving ``turned-on`` untouched:
        }
    }
 
-Adding an API key:
-
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 22,
-       "method": "tools/call",
-       "params": {
-           "name": "sr_edit_config",
-           "arguments": {
-               "config": {
-                   "sysrepo-mcp:api-key": [
-                       {"key": "abc123", "user": "admin"}
-                   ]
-               }
-           }
-       }
-   }
-
-.. warning::
-
-   An agent able to write ``/sysrepo-mcp:api-key`` can grant itself another
-   NACM identity. That subtree must be denied to agents by NACM rules.
-
 sr_delete_config
 ~~~~~~~~~~~~~~~~
 
@@ -582,7 +517,7 @@ never empty it.
 
 ``ok`` (boolean), ``xpath`` (string).
 
-Removing one API key:
+Removing one oven configuration leaf:
 
 .. code-block:: json
 
@@ -593,7 +528,7 @@ Removing one API key:
        "params": {
            "name": "sr_delete_config",
            "arguments": {
-               "xpath": "/sysrepo-mcp:api-key[key='abc123']"
+               "xpath": "/oven:oven/temperature"
            }
        }
    }
@@ -1540,7 +1475,8 @@ The standard JSON-RPC 2.0 codes:
      - Internal error
      - Unexpected server-side failure.
 
-The implementation-defined range, ``-32000`` to ``-32099``:
+The implementation-defined range, ``-32000`` to ``-32099``, as defined in
+``include/sysrepo/mcp/utilities.h`` (``MCP_ERR_*``):
 
 .. list-table::
    :header-rows: 1
@@ -1551,40 +1487,52 @@ The implementation-defined range, ``-32000`` to ``-32099``:
      - Meaning
    * - ``-32000``
      - Server error
-     - Generic failure with no more precise code.
+     - Generic failure with no more precise code (e.g. the maximum number of
+       concurrent sessions is reached, or a sysrepo callback failed).
    * - ``-32001``
-     - Unauthenticated
-     - Missing or unknown API key. HTTP 401.
-   * - ``-32002``
-     - Access denied
-     - NACM refused the operation, or the module is not in the allow-list.
-   * - ``-32003``
      - Not found
      - Unknown module, or an XPath that no schema node matches.
-   * - ``-32004``
-     - Not supported
-     - A valid request the server does not implement.
-   * - ``-32005``
+   * - ``-32002``
      - Validation failed
      - The edit was rejected by the YANG schema or by sysrepo validation.
-   * - ``-32006``
+   * - ``-32003``
+     - Access denied
+     - NACM refused the operation, or the tool is blocked outright (module
+       install/uninstall, when authentication is on).
+   * - ``-32004``
      - Datastore locked
      - Another sysrepo client holds a conflicting lock.
-   * - ``-32007``
+   * - ``-32005``
      - Timeout
      - An operational subscriber or an RPC handler did not answer in time.
+   * - ``-32006``
+     - Not supported
+     - A valid request the server does not implement.
+   * - ``-32007``
+     - *(unused)*
+     - Reserved; not currently assigned to any condition.
    * - ``-32008``
      - Session required
      - The tool keeps state between requests. Call ``initialize`` and send
        the ``Mcp-Session-Id`` header it returns.
 
+.. warning::
+
+   A missing or unknown API key is **not** reported with a code from this
+   table: it currently reuses ``-32603`` (Internal error) with the message
+   "Unauthorized" and HTTP 401 (``method_initialize()`` and ``serve()`` in
+   ``transport.c``). This conflates a client-caused condition with the code
+   meant for unexpected server-side failure; it has not been reassigned to
+   ``-32007`` yet, tracked as a *Findings from this review* item in
+   :doc:`todo`.
+
 .. note::
 
-   Codes ``-32005`` to ``-32008`` are specific to this server. Earlier drafts
-   mapped every sysrepo failure to ``-32603``, which loses the distinction
-   between "your request is wrong", worth retrying differently, and "the
-   server is broken", not worth retrying at all. That distinction matters for
-   an agent, which decides what to do next from the error alone.
+   Codes ``-32000`` to ``-32006`` and ``-32008`` are specific to this server.
+   Earlier drafts mapped every sysrepo failure to ``-32603``, which loses the
+   distinction between "your request is wrong", worth retrying differently,
+   and "the server is broken", not worth retrying at all. That distinction
+   matters for an agent, which decides what to do next from the error alone.
 
 sysrepo error mapping
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1600,30 +1548,34 @@ sysrepo error mapping
      - none
      - 200
    * - ``SR_ERR_NOT_FOUND``
-     - ``-32003``
+     - ``-32001``
      - 200
    * - ``SR_ERR_INVAL_ARG``
-     - ``-32602``
-     - 200
-   * - ``SR_ERR_LY``
-     - ``-32602``
-     - 200
-   * - ``SR_ERR_VALIDATION_FAILED``, ``SR_ERR_EXISTS``
-     - ``-32005``
-     - 200
-   * - ``SR_ERR_UNAUTHORIZED``
      - ``-32002``
      - 200
+   * - ``SR_ERR_LY``
+     - ``-32002``
+     - 200
+   * - ``SR_ERR_VALIDATION_FAILED``, ``SR_ERR_EXISTS``
+     - ``-32002``
+     - 200
+   * - ``SR_ERR_UNAUTHORIZED``
+     - ``-32003``
+     - 200
    * - ``SR_ERR_LOCKED``
-     - ``-32006``
+     - ``-32004``
      - 200
    * - ``SR_ERR_TIME_OUT``
-     - ``-32007``
+     - ``-32005``
+     - 200
+   * - ``SR_ERR_UNSUPPORTED``
+     - ``-32006``
      - 200
    * - ``SR_ERR_OPERATION_FAILED``, ``SR_ERR_CALLBACK_FAILED``
      - ``-32000``
      - 200
-   * - ``SR_ERR_NO_MEMORY``, ``SR_ERR_INTERNAL``, ``SR_ERR_SYS``
+   * - ``SR_ERR_NO_MEMORY``, ``SR_ERR_INTERNAL``, ``SR_ERR_SYS``, and any
+       other code with no entry above
      - ``-32603``
      - 200
 
@@ -1633,6 +1585,13 @@ sysrepo error mapping
    something the client supplied, an XPath libyang could not compile or data
    that does not match the schema, and reporting it as an internal failure
    would tell the agent to give up when it should fix its request.
+
+   ``SR_ERR_INVAL_ARG`` and ``SR_ERR_LY`` are both mapped to ``-32002``
+   (validation) by default in ``mcp_code_from_sr()``, but
+   ``mcp_err_from_session()`` refines this from the sysrepo error message
+   afterwards: a message containing "cannot resolve" becomes ``-32001`` (not
+   found), and one containing "Expected" or "Unexpected" becomes ``-32602``
+   (invalid params) rather than staying a data-validation error.
 
 The ``data.sysrepo`` member of the error object carries the original code name
 and the message returned by ``sr_session_get_error()``, so nothing upstream is

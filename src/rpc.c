@@ -16,6 +16,7 @@
 
 #include <libyang/libyang.h>
 #include <sysrepo.h>
+#include <sysrepo/netconf_acm.h>
 
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/rpc.h>
@@ -88,6 +89,20 @@ rpc_common(struct tool_ctx *ctx, struct json_object *args, struct mcp_err *err)
 	}
 
 	sr_session_release_context(ctx->sess);
+
+	/* NACM : vérifier l'autorisation de l'opération. */
+
+	if (mcp_config_get()->auth_method > 0) {
+		rc = sr_nacm_check_operation(ctx->sess, op);
+		if (rc != SR_ERR_OK) {
+			mcp_err_set(err, MCP_ERR_DENIED, "Not permitted",
+				    "NACM denied: %s", xpath);
+			lyd_free_all(op);
+			if (output)
+				sr_release_data(output);
+			return NULL;
+		}
+	}
 
 	rc = sr_rpc_send_tree(ctx->sess, op, (uint32_t)timeout, &output);
 	lyd_free_all(op);

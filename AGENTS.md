@@ -41,12 +41,14 @@ Résumé au moment de la rédaction. Le détail est dans `sphinx/todo.rst`.
 | Outils datastore, RPC, actions | fonctionnels |
 | Notifications (abonnement, file, `sr_notif_poll`) | fonctionnel |
 | Gestion des modules, introspection | fonctionnel |
-| Authentification, NACM | **absents** |
+| Authentification (clés API, libconfig), NACM | **fonctionnels**, y compris sur les RPC/actions |
 | elog | **absent**, `fprintf(stderr)` à la place |
 | `get_help` : ranges, patterns, valeurs par défaut | **implémenté** |
 
-> **Aucun contrôle d'accès n'est appliqué.** Un agent obtient les droits de
-> l'utilisateur système du serveur. Ne pas exposer cette version.
+> **Le contrôle d'accès dépend de la configuration de déploiement.** Sans
+> clé API configurée (`auth.api_keys[]` dans le fichier libconfig), un agent
+> obtient les droits de l'utilisateur système du serveur. Ne pas exposer une
+> instance sans clés ni règles NACM à un agent non digne de confiance.
 
 > **`max-procs` doit valoir 1.** Sessions, abonnements et files d'attente
 > vivent dans le processus qui les a créés.
