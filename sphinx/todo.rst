@@ -354,12 +354,11 @@ P4 — Tests to complete
 3. Exercise notification replay, which needs replay support enabled on a
    module.
 4. Exercise queue overflow and the ``dropped`` counter.
-5. Cover ``sr_module_install`` and ``sr_module_uninstall`` beyond argument
-   validation. A first round-trip against the suite's private repository
-   showed that ``sr_install_module()`` can report a timeout after logging that
-   the module was installed; sysrepo reports a repository lock held by the
-   server process. Resolve that interaction before adding an install test, and
-   verify cleanup after partial success.
+5. ~~Cover ``sr_module_install`` and ``sr_module_uninstall`` beyond argument
+   validation.~~ A round-trip test installs a temporary YANG module into the
+   suite's private repository, lists it, uninstalls it and verifies cleanup.
+   The server must not retain a connection-level libyang context while these
+   operations run: that read lock prevents sysrepo from updating the schema.
 
 P5 — Later / future features
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

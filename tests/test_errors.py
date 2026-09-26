@@ -263,6 +263,39 @@ def test_uninstalling_an_unknown_module_fails(mcp):
     assert error["code"] != -32603
 
 
+def test_module_can_be_installed_and_uninstalled(mcp, tmp_path):
+    module_name = "sysrepo-mcp-module-tool-test"
+    module_path = tmp_path / f"{module_name}.yang"
+    module_path.write_text(
+        f'''module {module_name} {{
+  yang-version 1.1;
+  namespace "urn:sysrepo-mcp:module-tool-test";
+  prefix mtt;
+  revision 2026-09-26;
+  container test-state {{
+    leaf value {{ type string; }}
+  }}
+}}
+'''
+    )
+
+    mcp.tool("sr_module_install", {"yang_file": str(module_path)})
+    try:
+        names = {
+            entry["name"]
+            for entry in mcp.tool("sr_list_modules", {})["modules"]
+        }
+        assert module_name in names
+    finally:
+        mcp.tool("sr_module_uninstall", {"module": module_name})
+
+    names = {
+        entry["name"]
+        for entry in mcp.tool("sr_list_modules", {})["modules"]
+    }
+    assert module_name not in names
+
+
 # ---------------------------------------------------------------------------
 # Error object shape
 # ---------------------------------------------------------------------------

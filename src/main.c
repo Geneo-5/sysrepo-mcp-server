@@ -45,7 +45,6 @@
  */
 
 sr_conn_ctx_t         *g_conn;
-static const struct ly_ctx  *ly_ctx;
 static sr_subscription_ctx_t *g_nacm_sub;
 time_t                 g_start_time;
 volatile sig_atomic_t stopping;
@@ -292,14 +291,6 @@ sysrepo_open(void)
 		mcp_log_err("sr_connect: %s", sr_strerror(rc));
 		return rc;
 	}
-	ly_ctx = sr_acquire_context(g_conn);
-	if (ly_ctx == NULL) {
-		mcp_log_err("sr_acquire_context failed");
-		sr_disconnect(g_conn);
-		g_conn = NULL;
-		return -1;
-	}
-
 	/* NACM : initialiser le contrôle d'accès une fois pour toutes les sessions. */
 
 	g_nacm_sub = NULL;
@@ -321,7 +312,6 @@ sysrepo_close(void)
 {
 	if (g_conn) {
 		sr_nacm_destroy();
-		sr_release_context(g_conn);
 		sr_disconnect(g_conn);
 		g_conn = NULL;
 	}
