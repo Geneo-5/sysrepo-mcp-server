@@ -40,7 +40,7 @@ Done
   ``tools/list``, ``ping``, and the ``content`` result envelope.
 - Sessions: ``Mcp-Session-Id``, idle expiry, maximum count, ``DELETE``.
 - Datastore tools: ``sr_get_config``, ``sr_edit_config``,
-  ``sr_delete_config``, ``sr_get_operational``.
+  ``sr_delete_config``, ``sr_copy_config``, ``sr_get_operational``.
 - Operation tools: ``sr_execute_rpc``, ``sr_action``.
 - Notification tools: ``sr_notif_subscribe``, ``sr_notif_unsubscribe``,
   ``sr_notif_list_subscriptions``, ``sr_notif_poll``, ``sr_notif_send``.
@@ -300,13 +300,16 @@ agent to guess or work around a limitation.
    recurses into RPC/action ``input``/``output`` nodes, ``time`` in
    ``insert-food`` stops being reported as ``unknown`` on its own, without a
    separate ``get_input_schema`` tool.~~
-3. **No feedback after write.** ``sr_edit_config`` returns ``{"ok": true}``
-   but not how many nodes were modified. An agent cannot confirm the edit
-   did what it expected.
-4. **Missing ``copy-config``.** A tool taking ``source`` and ``destination``
-   (datastore by datastore) to copy one datastore's content into another
-   (e.g. ``startup → running``, ``candidate → running``) — the YANG
-   equivalent of NETCONF's ``copy-config``.
+3. ~~**No feedback after write.**~~ ``sr_edit_config`` now reports
+   ``edit_nodes``: the number of explicit schema nodes in the accepted edit
+   tree, including structural containers. This confirms the submitted edit
+   size, not the datastore diff: repeated values still count, and removals
+   caused by ``replace`` are not included. Exact before/after change reporting
+   remains the scope of the planned ``sr_diff_config`` tool (P5.2).
+4. ~~**Missing ``copy-config``.**~~ ``sr_copy_config`` takes required
+   ``source`` and ``destination`` conventional datastore names, rejects a
+   same-datastore request, and delegates the full replacement to sysrepo
+   ``sr_copy_config()``. It intentionally has no per-module filter.
 5. ~~**Default values: selectable output.**~~ The call chain is
    ``sr_get_config`` → ``sr_get_data()`` (without ``LYD_OPT_DEFAULT``) →
    ``tree_to_json()`` → ``lyd_print_mem()``. ``sr_get_config`` accepts an
@@ -488,7 +491,8 @@ Source layout
    ``tool_content``.
 
 ``src/config_tools.c``
-   ``sr_get_config``, ``sr_edit_config``, ``sr_delete_config``.
+   ``sr_get_config``, ``sr_edit_config``, ``sr_delete_config``,
+   ``sr_copy_config``.
 
 ``src/operational.c``
    ``sr_get_operational``.

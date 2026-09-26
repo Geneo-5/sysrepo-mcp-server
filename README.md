@@ -32,7 +32,7 @@ actions, and explore YANG schemas.
 ## Features
 
 - **Configuration**: read, modify and delete configuration through the
-  sysrepo API (`sr_get_config`, `sr_edit_config`, `sr_delete_config`).
+  sysrepo API (`sr_get_config`, `sr_edit_config`, `sr_delete_config`, `sr_copy_config`).
 - **Monitoring**: read operational state (`sr_get_operational`).
 - **Operations**: invoke YANG RPCs and actions.
 - **Notifications**: subscribe a session to a module's notifications and

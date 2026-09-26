@@ -72,7 +72,7 @@ const struct tool_desc tools[] = {
 	},
 	{
 		"sr_edit_config",
-		"Apply a configuration change.",
+		"Apply a configuration change and report the number of edit nodes.",
 		"{\"type\":\"object\",\"properties\":{"
 		"\"xpath\":{\"type\":\"string\"},"
 		"\"datastore\":{\"type\":\"string\","
@@ -93,6 +93,17 @@ const struct tool_desc tools[] = {
 		"\"strict\":{\"type\":\"boolean\",\"default\":false}},"
 		"\"required\":[\"xpath\"]}",
 		tool_sr_delete_config, 1
+	},
+	{
+		"sr_copy_config",
+		"Replace one datastore with the contents of another.",
+		"{\"type\":\"object\",\"properties\":{"
+		"\"source\":{\"type\":\"string\",\"enum\":["
+		"\"running\",\"startup\",\"candidate\"]},"
+		"\"destination\":{\"type\":\"string\",\"enum\":["
+		"\"running\",\"startup\",\"candidate\"]}},"
+		"\"required\":[\"source\",\"destination\"]}",
+		tool_sr_copy_config, 1
 	},
 	{
 		"sr_get_operational",

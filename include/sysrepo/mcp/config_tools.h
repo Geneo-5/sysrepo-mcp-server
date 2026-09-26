@@ -22,6 +22,9 @@ struct json_object *tool_sr_edit_config(struct tool_ctx *ctx,
 					struct json_object *args,
 					struct mcp_err *err);
 struct json_object *tool_sr_delete_config(struct tool_ctx *ctx,
+					  struct json_object *args,
+					  struct mcp_err *err);
+struct json_object *tool_sr_copy_config(struct tool_ctx *ctx,
 					struct json_object *args,
 					struct mcp_err *err);
 

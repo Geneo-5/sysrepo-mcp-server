@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "sr_get_config",
     "sr_edit_config",
     "sr_delete_config",
+    "sr_copy_config",
     "sr_get_operational",
     "sr_execute_rpc",
     "sr_action",

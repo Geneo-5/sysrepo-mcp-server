@@ -114,10 +114,14 @@ def test_replace_operation_drops_unmentioned_nodes(oven_off):
 
 
 def test_edit_reports_the_operation_it_applied(oven_off):
-    result = oven_off.edit_config({"oven:oven": {"temperature": 100}})
+    result = oven_off.edit_config(
+        {"oven:oven": {"temperature": 100, "turned-on": True}}
+    )
 
     assert result["ok"] is True
     assert result["operation"] == "merge"
+    # The count includes the explicit container and its two submitted leaves.
+    assert result["edit_nodes"] == 3
 
 
 def test_boundary_temperatures_are_accepted(oven_off):

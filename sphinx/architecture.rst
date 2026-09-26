@@ -447,6 +447,9 @@ The tool surface is specified in :doc:`api`. Summarised by area:
    * - ``sr_delete_config``
      - implemented
      - ``sr_delete_item()`` + ``sr_apply_changes()``
+   * - ``sr_copy_config``
+     - implemented
+     - ``sr_copy_config()``
    * - ``sr_get_operational``
      - implemented
      - ``sr_session_switch_ds()`` + ``sr_get_data()``

@@ -277,6 +277,9 @@ Tool catalogue
    * - ``sr_delete_config``
      - implemented
      - Delete configuration data
+   * - ``sr_copy_config``
+     - implemented
+     - Replace one datastore with another
    * - ``sr_diff_config``
      - planned
      - Compare two datastores over a subtree
@@ -437,8 +440,16 @@ sr_edit_config
 ``ok`` (boolean)
    True when the change was validated and committed.
 
-``changed`` (integer)
-   Number of nodes affected.
+``operation`` (string)
+   Operation that was applied: ``merge``, ``replace`` or ``none``.
+
+``edit_nodes`` (integer)
+   Number of explicit schema nodes in the submitted config tree. The count
+   includes containers and list nodes as well as their leaves. It confirms
+   the size of the edit accepted by sysrepo; it is not a datastore diff, so
+   a merge that writes existing values still counts them, and a replace may
+   remove nodes that are absent from the submitted tree without counting
+   those removals.
 
 Turning the oven on at 200 degrees:
 
@@ -470,7 +481,8 @@ Turning the oven on at 200 degrees:
        "id": 20,
        "result": {
            "ok": true,
-           "changed": 2
+           "operation": "merge",
+           "edit_nodes": 3
        }
    }
 
@@ -542,6 +554,42 @@ Removing one oven configuration leaf:
    The XPath is evaluated, not matched literally: ``/oven:oven`` removes the
    whole container, and a path naming a list with no predicate removes every
    entry. There is no confirmation step and no undo.
+
+sr_copy_config
+~~~~~~~~~~~~~~
+
+*Status: implemented.* Replaces an entire conventional datastore with the
+contents of another using sysrepo's native ``sr_copy_config()`` operation.
+
+**Arguments**
+
+``source`` (string, required)
+   Source datastore: ``running``, ``startup`` or ``candidate``.
+
+``destination`` (string, required)
+   Destination datastore: ``running``, ``startup`` or ``candidate``. Must be
+   different from ``source``.
+
+**Result**
+
+``ok`` (boolean), ``source`` (string), ``destination`` (string).
+
+The operation requires write access to the destination, and sysrepo applies
+its normal validation and change callbacks. Copying between ``candidate``
+and ``running`` resets candidate to its normal mirroring behavior. The tool
+copies the complete datastore; it has no module or XPath filter.
+
+.. code-block:: json
+
+   {
+       "jsonrpc": "2.0",
+       "id": 26,
+       "method": "tools/call",
+       "params": {
+           "name": "sr_copy_config",
+           "arguments": {"source": "startup", "destination": "running"}
+       }
+   }
 
 sr_diff_config
 ~~~~~~~~~~~~~~

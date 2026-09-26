@@ -6,10 +6,11 @@
  ******************************************************************************
  *
  * Configuration datastore tools: sr_get_config, sr_edit_config,
- * sr_delete_config.
+ * sr_delete_config, sr_copy_config.
  */
 
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,94 @@
 #include <sysrepo/mcp/utilities.h>
 #include <sysrepo/mcp/config_tools.h>
 #include <sysrepo/mcp/libconfig.h>
+
+/* Count the explicit schema nodes in the parsed edit. This is the number of
+ * nodes submitted by the caller, not a datastore diff: merge may be a no-op,
+ * and replace may also remove nodes that are absent from this tree. */
+static uint64_t
+edit_node_count(const struct lyd_node *node)
+{
+	uint64_t count = 0;
+
+	for (; node; node = node->next) {
+		count++;
+		count += edit_node_count(lyd_child(node));
+	}
+	return count;
+}
+
+static int
+copy_datastore_arg(struct json_object *args, const char *key,
+		   sr_datastore_t *datastore, const char **name,
+		   struct mcp_err *err)
+{
+	struct json_object *value;
+
+	if (!args || !json_object_object_get_ex(args, key, &value)) {
+		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+		            "%s is required", key);
+		return -1;
+	}
+	if (!json_object_is_type(value, json_type_string)) {
+		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+		            "%s must be a datastore name string", key);
+		return -1;
+	}
+	*name = json_object_get_string(value);
+	if (!strcmp(*name, "running"))
+		*datastore = SR_DS_RUNNING;
+	else if (!strcmp(*name, "startup"))
+		*datastore = SR_DS_STARTUP;
+	else if (!strcmp(*name, "candidate"))
+		*datastore = SR_DS_CANDIDATE;
+	else {
+		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+		            "%s must be running, startup or candidate", key);
+		return -1;
+	}
+	return 0;
+}
+
+struct json_object *
+tool_sr_copy_config(struct tool_ctx *ctx, struct json_object *args,
+		    struct mcp_err *err)
+{
+	const char *source_name = NULL, *destination_name = NULL;
+	sr_datastore_t source, destination;
+	struct json_object *res;
+	int rc;
+
+	if (copy_datastore_arg(args, "source", &source, &source_name, err) ||
+	    copy_datastore_arg(args, "destination", &destination,
+	                       &destination_name, err))
+		return NULL;
+	if (source == destination) {
+		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+		            "source and destination must be different datastores");
+		return NULL;
+	}
+
+	rc = sr_session_switch_ds(ctx->sess, destination);
+	if (rc != SR_ERR_OK) {
+		mcp_err_from_session(err, ctx->sess, rc,
+		                     "sr_session_switch_ds");
+		return NULL;
+	}
+	rc = sr_copy_config(ctx->sess, NULL, source,
+	                    mcp_config_get()->default_timeout_ms);
+	if (rc != SR_ERR_OK) {
+		mcp_err_from_session(err, ctx->sess, rc, "sr_copy_config");
+		return NULL;
+	}
+
+	res = json_object_new_object();
+	json_object_object_add(res, "ok", json_object_new_boolean(1));
+	json_object_object_add(res, "source",
+	                       json_object_new_string(source_name));
+	json_object_object_add(res, "destination",
+	                       json_object_new_string(destination_name));
+	return res;
+}
 
 /* ---------------------------------------------------------------- sr_get_config
  */
@@ -143,6 +232,7 @@ tool_sr_edit_config(struct tool_ctx *ctx, struct json_object *args,
 	struct lyd_node      *edit = NULL;
 	struct json_object   *res;
 	sr_datastore_t        ds;
+	uint64_t              edit_nodes;
 	int                   rc;
 
 	if (!config) {
@@ -207,6 +297,7 @@ tool_sr_edit_config(struct tool_ctx *ctx, struct json_object *args,
 			    "config produced an empty edit");
 		return NULL;
 	}
+	edit_nodes = edit_node_count(edit);
 
 	rc = sr_edit_batch(ctx->sess, edit, operation);
 	lyd_free_all(edit);
@@ -228,6 +319,8 @@ tool_sr_edit_config(struct tool_ctx *ctx, struct json_object *args,
 	json_object_object_add(res, "ok", json_object_new_boolean(1));
 	json_object_object_add(res, "operation",
 	                       json_object_new_string(operation));
+	json_object_object_add(res, "edit_nodes",
+	                       json_object_new_uint64(edit_nodes));
 
 	return res;
 }
