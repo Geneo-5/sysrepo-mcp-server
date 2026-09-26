@@ -9,6 +9,5 @@
 export PROJECT_DIR="${PWD}"
 rm -rf /dev/shm/*
 sysrepo-plugind -V5
-sysrepoctl --install yang/sysrepo-mcp.yang
 
 lighttpd -D -f ${PROJECT_DIR}/docker/lighttpd.conf
