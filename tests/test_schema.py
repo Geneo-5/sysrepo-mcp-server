@@ -131,6 +131,39 @@ def test_subtree_request_on_a_leaf(mcp_oven):
     assert "children" not in roots["temperature"]
 
 
+def test_schema_depth_zero_is_unlimited(mcp_module):
+    result = mcp_module.tool(
+        "get_tree", {"module": "sysrepo-mcp-test",
+                     "xpath": "/sysrepo-mcp-test:server-state",
+                     "max_depth": 0}
+    )
+    session = result["tree"]["nodes"]["server-state"]["children"]["session"]
+
+    assert "children" in session
+
+
+def test_schema_depth_one_stops_at_direct_children(mcp_module):
+    result = mcp_module.tool(
+        "get_tree", {"module": "sysrepo-mcp-test",
+                     "xpath": "/sysrepo-mcp-test:server-state",
+                     "max_depth": 1}
+    )
+    session = result["tree"]["nodes"]["server-state"]["children"]["session"]
+
+    assert "children" not in session
+
+
+def test_schema_depth_two_includes_grandchildren(mcp_module):
+    result = mcp_module.tool(
+        "get_tree", {"module": "sysrepo-mcp-test",
+                     "xpath": "/sysrepo-mcp-test:server-state",
+                     "max_depth": 2}
+    )
+    session = result["tree"]["nodes"]["server-state"]["children"]["session"]
+
+    assert "children" in session
+
+
 def test_module_root_and_explicit_slash_agree(mcp_oven, tree):
     explicit = mcp_oven.tool("get_tree", {"module": "oven", "xpath": "/"})
 

@@ -17,6 +17,7 @@ extern "C" {
 
 struct json_object *schema_node_to_json(const struct lysc_node *node,
 					int with_desc, int depth,
+					int effective_depth,
 					struct json_object *flat,
 					const char *parent_path);
 struct json_object *tool_get_tree(struct tool_ctx *ctx,

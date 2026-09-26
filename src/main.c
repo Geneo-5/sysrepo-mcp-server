@@ -202,6 +202,8 @@ const struct tool_desc tools[] = {
 		"{\"type\":\"object\",\"properties\":{"
 		"\"module\":{\"type\":\"string\"},"
 		"\"xpath\":{\"type\":\"string\"},"
+		"\"max_depth\":{\"type\":\"integer\",\"minimum\":0,"
+		"\"default\":0},"
 		"\"with_descriptions\":{\"type\":\"boolean\","
 		"\"default\":false}},\"required\":[\"module\"]}",
 		tool_get_tree, 1

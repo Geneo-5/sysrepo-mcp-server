@@ -1261,6 +1261,10 @@ build valid XPaths without reading the YANG source.
 ``xpath`` (string, optional)
    Subtree root inside the module. Default: the module root.
 
+``max_depth`` (integer, optional)
+   Maximum number of levels below the selected root. Zero means unlimited,
+   subject to the configured schema depth ceiling. Default 0.
+
 ``revision`` (string, optional)
    Module revision. Default: the implemented one.
 

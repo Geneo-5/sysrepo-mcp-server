@@ -34,7 +34,8 @@
 
 struct json_object *
 schema_node_to_json(const struct lysc_node *node, int with_desc, int depth,
-                    struct json_object *flat, const char *parent_path)
+		    int effective_depth, struct json_object *flat,
+		    const char *parent_path)
 {
 	struct json_object     *obj = json_object_new_object();
 	const struct lysc_node *child;
@@ -73,7 +74,7 @@ schema_node_to_json(const struct lysc_node *node, int with_desc, int depth,
 		json_object_array_add(flat, entry);
 	}
 
-	if (depth < (int)mcp_config_get()->max_tree_depth) {
+	if (depth < effective_depth) {
 		struct json_object *children = NULL;
 
 		for (child = lysc_node_child(node); child;
@@ -82,9 +83,8 @@ schema_node_to_json(const struct lysc_node *node, int with_desc, int depth,
 				children = json_object_new_object();
 			json_object_object_add(children, child->name,
 			                       schema_node_to_json(
-					       child, with_desc,
-					       depth + 1, flat,
-					       path));
+			       child, with_desc, depth + 1,
+			       effective_depth, flat, path));
 		}
 
 		if (children)
@@ -128,6 +128,8 @@ tool_get_tree(struct tool_ctx *ctx, struct json_object *args,
 	struct json_object      *roots;
 	int                      with_desc = arg_bool(args,
 	                                              "with_descriptions", 0);
+	int                      max_depth = arg_int(args, "max_depth", 0);
+	int                      effective_depth;
 
 	if (xpath && strcmp(xpath, "/") && !xpath_wellformed(xpath)) {
 		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
@@ -135,6 +137,14 @@ tool_get_tree(struct tool_ctx *ctx, struct json_object *args,
 			    "module prefix; got \"%s\"", xpath);
 		return NULL;
 	}
+	if (max_depth < 0) {
+		mcp_err_set(err, MCP_ERR_PARAMS, "Invalid params",
+		            "max_depth must not be negative");
+		return NULL;
+	}
+	effective_depth = max_depth == 0 ||
+		max_depth > (int)mcp_config_get()->max_tree_depth ?
+		(int)mcp_config_get()->max_tree_depth : max_depth;
 
 	ly = sr_session_acquire_context(ctx->sess);
 	if (!ly) {
@@ -178,30 +188,31 @@ tool_get_tree(struct tool_ctx *ctx, struct json_object *args,
 			return NULL;
 		}
 		json_object_object_add(roots, node->name,
-		                       schema_node_to_json(node, with_desc, 0,
-		                                           nodes, NULL));
+	                       schema_node_to_json(node, with_desc, 0,
+	                                           effective_depth,
+	                                           nodes, NULL));
 	} else {
 		/* Data nodes, RPCs and notifications are three separate lists
 		 * in a compiled module; an agent needs all three. */
 		for (node = mod->compiled->data; node; node = node->next)
 			json_object_object_add(roots, node->name,
 			                       schema_node_to_json(
-				       node, with_desc, 0,
-				       nodes, NULL));
+			       node, with_desc, 0, effective_depth,
+			       nodes, NULL));
 
 		for (node = (const struct lysc_node *)mod->compiled->rpcs;
 		     node; node = node->next)
 			json_object_object_add(roots, node->name,
 			                       schema_node_to_json(
-				       node, with_desc, 0,
-				       nodes, NULL));
+			       node, with_desc, 0, effective_depth,
+			       nodes, NULL));
 
 		for (node = (const struct lysc_node *)mod->compiled->notifs;
 		     node; node = node->next)
 			json_object_object_add(roots, node->name,
 			                       schema_node_to_json(
-				       node, with_desc, 0,
-				       nodes, NULL));
+			       node, with_desc, 0, effective_depth,
+			       nodes, NULL));
 	}
 
 	sr_session_release_context(ctx->sess);
