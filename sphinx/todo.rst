@@ -351,8 +351,9 @@ P4 — Tests to complete
    code will break first.
 2. Run the server under valgrind; the JSON reference counting and the
    notification queue deserve it.
-3. Exercise notification replay, which needs replay support enabled on a
-   module.
+3. ~~Exercise notification replay, which needs replay support enabled on a
+   module.~~ The test enables replay on ``oven``, emits an event before
+   subscribing, then verifies the historical event and replay completion.
 4. ~~Exercise queue overflow and the ``dropped`` counter.~~ The test sends
    ten notifications into an eight-entry test queue, verifies that two were
    dropped and drains the eight most recent entries.

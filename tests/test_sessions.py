@@ -16,6 +16,7 @@ with sr_notif_send rather than by waiting for the plugin to heat the oven,
 so the tests are deterministic.
 """
 
+import subprocess
 import time
 
 import pytest
@@ -308,6 +309,53 @@ def test_a_sent_notification_is_received(oven_session):
     assert notification["kind"] == "realtime"
     assert notification["timestamp"] > 0
     assert "oven:oven-ready" in notification["data"]
+
+
+def test_notification_replay_returns_stored_events(oven_session, sysrepo_env):
+    """Replay returns notifications emitted before the subscription."""
+    enable = subprocess.run(
+        ["sysrepoctl", "--change", "oven", "--replay", "on"],
+        env=sysrepo_env,
+        capture_output=True,
+        text=True,
+    )
+    assert enable.returncode == 0, enable.stdout + enable.stderr
+
+    try:
+        replay_start = int(time.time()) - 60
+        oven_session.tool("sr_notif_send", {"xpath": OVEN_READY})
+        oven_session.tool(
+            "sr_notif_subscribe",
+            {"module": "oven", "replay_start": replay_start},
+        )
+
+        batch = wait_for(
+            lambda: (lambda result: result if result["notifications"] else None)(
+                oven_session.tool("sr_notif_poll", {"peek": True})
+            )
+        )
+        assert batch, "the stored notification was not replayed"
+        assert any(
+            item["xpath"] == OVEN_READY and item["kind"] == "replay"
+            for item in batch["notifications"]
+        ), batch
+
+        complete = wait_for(
+            lambda: (lambda result: result if any(
+                item["kind"] == "replay-complete"
+                for item in result["notifications"]
+            ) else None)(oven_session.tool("sr_notif_poll", {"peek": True}))
+        )
+        assert complete, "sysrepo did not signal replay completion"
+    finally:
+        oven_session.tool("sr_notif_unsubscribe", {})
+        disable = subprocess.run(
+            ["sysrepoctl", "--change", "oven", "--replay", "off"],
+            env=sysrepo_env,
+            capture_output=True,
+            text=True,
+        )
+        assert disable.returncode == 0, disable.stdout + disable.stderr
 
 
 def test_polling_drains_the_queue(oven_session):
