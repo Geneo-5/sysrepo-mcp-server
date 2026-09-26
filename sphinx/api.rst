@@ -1177,7 +1177,9 @@ how an agent discovers what it may address before calling ``get_tree``.
 
 ``modules`` (array of objects)
    Each with ``name``, ``revision``, ``namespace``, ``prefix`` and
-   ``implemented``.
+   ``implemented``. Each object also includes ``features``, an array of
+   enabled YANG feature names (empty when none are enabled or the module is
+   not implemented).
 
 ``count`` (integer)
 
@@ -1193,17 +1195,13 @@ how an agent discovers what it may address before calling ``get_tree``.
                    "revision": "2018-01-19",
                    "namespace": "urn:sysrepo:oven",
                    "prefix": "ov",
-                   "implemented": true
+                   "implemented": true,
+                   "features": []
                }
            ],
            "count": 1
        }
    }
-
-.. note::
-
-   Enabled features are not reported yet: they live behind the parsed schema
-   rather than the compiled one. See :doc:`todo`.
 
 System tools
 ------------

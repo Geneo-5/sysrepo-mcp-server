@@ -301,7 +301,9 @@ agent to guess or work around a limitation.
    the list preserves the prior libyang output. These choices control
    printing of defaults in the returned tree; they do not request that
    sysrepo materialize implicit defaults absent from that tree.
-6. ``sr_list_modules`` does not report enabled features.
+6. ~~``sr_list_modules`` does not report enabled features.~~ The tool now
+   includes enabled feature names for implemented modules and an empty list
+   otherwise.
 
 P3 — Logging and packaging
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

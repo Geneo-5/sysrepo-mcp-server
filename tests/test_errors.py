@@ -233,6 +233,7 @@ def test_list_modules_describes_each_one(mcp_oven):
     assert oven["namespace"] == "urn:sysrepo:oven"
     assert oven["prefix"] == "ov"
     assert oven["implemented"] is True
+    assert oven["features"] == []
 
 
 def test_list_modules_can_include_imported_ones(mcp_oven):
