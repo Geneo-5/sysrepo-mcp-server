@@ -109,6 +109,24 @@ Findings from this review (not yet triaged into a priority)
   chapter's own opening warning, which already says authentication is
   implemented. Needs the same reconciliation pass as the other three docs.
 
+**Recent test runs exposed regressions; their fixes still need a green rerun.**
+One run reported 269 passing and three failures: the NACM-denied RPC returned
+``-32001`` because the isolated auth repository did not have ``oven``
+installed, and two oven read-back assertions lost ``false``/default-valued
+leaves after ``LYD_PRINT_WD_TRIM`` was made the implicit printer flag. The
+auth fixture now installs ``oven``, and ``sr_get_config`` preserves the old
+output when ``options`` is omitted. A subsequent run reported three protocol
+failures because ``sr_get_config``'s malformed input-schema JSON was exposed
+as an empty schema; the catalogue string was corrected. These corrections
+have not yet been verified by a complete passing run.
+
+**Live oven audit not yet performed.** The user reports adding a sysrepo-mcp
+connection, but this Codex session exposes no sysrepo-mcp tool or resource:
+the callable tool list has no sysrepo entry, and the MCP resource list only
+contains plugin-management resources. Record runtime findings after that
+connection is available to the agent; do not infer live behavior from the
+local test fixtures.
+
 P0 — Security (blocks any untrusted deployment)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
