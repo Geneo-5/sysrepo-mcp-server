@@ -449,6 +449,18 @@ class ModuleInstall:
     output: str
 
 
+@dataclass
+class FailClosedResult:
+    """
+    Outcome of probing a server started with a broken config, from the
+    ``fail_closed`` fixture: the case under test and whether the server
+    answered 200 to ``get_status``.
+    """
+
+    mode: str   # "absent" | "syntax" | "validation"
+    served: bool
+
+
 def _install_module(env: dict[str, str], name: str, path: Path,
                     search_dirs: list[Path]) -> ModuleInstall:
     if not path.is_file():
@@ -1092,6 +1104,138 @@ def mcp_auth(
         output, _ = proc.communicate(timeout=5)
     if output:
         print(f"\n=== sysrepo-mcp server output (final) ===\n{output.decode(errors='replace')}\n{'='*38}", end="")
+
+
+@pytest.fixture(
+    params=["absent", "syntax", "validation"],
+    ids=["absent-config", "syntax-error", "validation-error"],
+    scope="function",
+)
+def fail_closed(request, nacm_config, tmp_path_factory) -> FailClosedResult:
+    """
+    Start sysrepo-mcp behind lighttpd with a broken config file, then probe it
+    and report whether the server served ``get_status``.
+
+    The three cases, all exercising the ``--config <file>`` path so main()
+    reaches ``mcp_config_load()``:
+
+    * ``absent``    — no file at all: the one documented exception, the server
+      must fall back to its built-in defaults and serve (``served is True``).
+    * ``syntax``    — a libconfig file that will not parse: the server must
+      fail closed (``served is False``).
+    * ``validation`` — a file that libconfig parses but that fails range
+      validation in ``mcp_config_load()``: the server must fail closed.
+
+    The fail-closed cases never reach ``sysrepo_open`` (the config load fails
+    first and ``main()`` exits before binding), so they never hold the
+    repository; only the ``absent`` responder does, and the params run
+    sequentially, so there is no contention between them.
+    """
+    mode = request.param
+    auth_sysrepo_env = nacm_config
+
+    if not auth_sysrepo_env:
+        pytest.skip("sysrepo unavailable: no repository to serve")
+
+    binary = _server_binary()
+    if not binary.is_file():
+        pytest.skip(f"{binary} not found: build it with scripts/build-docker.sh")
+    if not os.access(binary, os.X_OK):
+        pytest.skip(f"{binary} is not executable")
+    if shutil.which("lighttpd") is None:
+        pytest.skip("lighttpd not found: build the container image first")
+
+    root = tmp_path_factory.mktemp(f"lighttpd_{mode}")
+    docroot = root / "www"
+    docroot.mkdir()
+
+    # 'absent' leaves the file uncreated so the server must fall back to its
+    # built-in defaults; the other two write an invalid file whose path is
+    # passed to the server as --config, making the failure real.
+    conf_file = root / "server.conf"
+    if mode == "syntax":
+        # Unbalanced braces: libconfig will not parse this file.
+        conf_file.write_text('server {\n  session {\n    max_sessions = 64\n')
+    elif mode == "validation":
+        # Present and parseable, but out of range: rejected by
+        # mcp_config_load() and, with the fail-closed change, shuts the
+        # server down in main().
+        conf_file.write_text(
+            'server {\n  session {\n    max_sessions = 999999\n  }\n}\n'
+        )
+
+    conf = root / "lighttpd.conf"
+    errorlog = root / "error.log"
+    port = TEST_PORT + (20 if mode == "absent" else (21 if mode == "syntax" else 22))
+    conf.write_text(
+        LIGHTTPD_CONF.format(
+            docroot=docroot,
+            host=TEST_HOST,
+            port=port,
+            errorlog=errorlog,
+            pidfile=root / "lighttpd.pid",
+            endpoint=MCP_ENDPOINT,
+            socket=root / "sysrepo-mcp.sock",
+            binary=binary,
+            config_path=str(conf_file),
+            repository=auth_sysrepo_env["SYSREPO_REPOSITORY_PATH"],
+            shm_prefix=auth_sysrepo_env["SYSREPO_SHM_PREFIX"],
+            ld_library_path=auth_sysrepo_env.get("LD_LIBRARY_PATH", "/usr/local/lib"),
+            argv=binary,
+        )
+    )
+
+    proc = subprocess.Popen(
+        ["lighttpd", "-D", "-f", str(conf)],
+        env=auth_sysrepo_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    probe_body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "get_status", "arguments": {"name": "get_status"}},
+        }
+    ).encode("utf-8")
+    client = McpClient(TEST_HOST, port)
+
+    # Probe repeatedly while the server starts: it serves 200 as soon as it is
+    # up (absent case). A fail-closed server never serves, so stop once the
+    # grace period elapses without a single 200.
+    deadline = time.monotonic() + STARTUP_TIMEOUT
+    grace_until = None
+    served = False
+    while time.monotonic() < deadline:
+        try:
+            probe = client.request(body=probe_body)
+        except OSError:
+            probe = None
+
+        if probe is not None and probe.status == 200:
+            served = True
+            break
+
+        if grace_until is not None and time.monotonic() > grace_until:
+            break
+        grace_until = grace_until or (time.monotonic() + 5.0)
+        time.sleep(POLL_INTERVAL)
+
+    # Stop the server, keep its output for the failure message.
+    proc.send_signal(signal.SIGTERM)
+    try:
+        output, _ = proc.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        output, _ = proc.communicate(timeout=5)
+    else:
+        output = output.decode(errors="replace")
+        if output:
+            print(f"\n=== sysrepo-mcp server output ({mode}) ===\n{output}\n{'=' * 35}", end="")
+
+    return FailClosedResult(mode, served)
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 
 #include <libconfig.h>
 
@@ -365,10 +367,21 @@ load_log(config_t *cc, struct mcp_config *cfg)
 int
 mcp_config_load(const char *path, struct mcp_config *cfg)
 {
-	config_t cc;
+	config_t   cc;
+	struct stat st;
 	int      rc;
 
 	config_init(&cc);
+
+	/* Un fichier de configuration absent n'est pas une erreur : main()
+	 * retombe sur les défauts intégrés. Toute autre échec — un fichier qui
+	 * existe mais ne se parse pas ou échoue à la validation — est fatal : le
+	 * serveur échoue fermé. Sinon syntaxe ou validation ratée
+	 * désactive silencieusement l'authentification configurée (todo.rst P0.2). */
+	if (stat(path, &st) != 0 && errno == ENOENT) {
+		config_destroy(&cc);
+		return -ENOENT;
+	}
 
 	if (!config_read_file(&cc, path)) {
 		mcp_log_err("libconfig: %s:%d: %s", path, config_error_line(&cc),

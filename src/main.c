@@ -361,6 +361,7 @@ main(int argc, char *argv[])
 	char             listener[160];
 	int              listener_fd = 0;
 	int              standalone;
+	int              rc;
 	int              opt;
 	static struct option long_options[] = {
 		{"config", required_argument, NULL, 'f'},
@@ -399,9 +400,27 @@ main(int argc, char *argv[])
 	if (mcp_log_init(&bootstrap) < 0)
 		return EXIT_FAILURE;
 
-	if (mcp_config_load(config_path, &cfg) < 0)
-		mcp_log_warn("could not load config file %s; using available defaults",
+	if ((rc = mcp_config_load(config_path, &cfg)) < 0) {
+		if (rc == -ENOENT) {
+			/* Aucun fichier de configuration : retomber sur les défauts
+			 * intégrés. C'est le seul cas documenté où l'absence n'est pas
+			 * une erreur — la valeur par défaut, sans authentification,
+			 * se comporte comme l'ancien server non authentifié. */
+			mcp_log_warn("config file %s not found; using built-in defaults",
 		             config_path);
+		} else {
+			/* Syntaxe ou validation ratée : échoué fermé. Ne pas continuer
+			 * avec les défauts, sinon tout le propos du serveur — et
+			 * l'authentification configurée, todo.rst P0.2 — serait désactivé
+			 * silencieusement. Fermer avant sysrepo_open(), avant de lier
+			 * un listener, avant toute exposition. */
+			mcp_config_free(&cfg);
+			mcp_log_close();
+			mcp_log_err("config file %s failed to load; shutting down",
+	                    config_path);
+			return EXIT_FAILURE;
+		}
+	}
 	if (cfg.log_verbose && !log_level_arg)
 		cfg.log_level = ELOG_DEBUG_SEVERITY;
 	if (log_level_arg) {

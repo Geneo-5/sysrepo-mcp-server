@@ -85,13 +85,23 @@ P0 — Security and fail-closed startup
    and process memory (SHA-256 rejected by the user as unnecessary CPU cost);
    require high-entropy values, restrictive config-file permissions, and
    never log credentials.
+- Fail closed on invalid configuration: ``main()`` fails closed (``EXIT_FAILURE``,
+   before ``sysrepo_open()`` and before binding a listener) when a config
+   file exists but fails to parse or fails range validation, so an invalid
+   syntax or out-of-range value never silently disables configured
+   authentication. An absent config is the sole documented exception: it
+   falls back to the built-in defaults and serves. Tested through the HTTP
+   layer: absent config serves, syntax error and out-of-range value both
+   fail closed (no ``HTTP 200``).
 
-2. **Fail closed on invalid configuration.** ``main()`` currently warns when
-   ``mcp_config_load()`` fails and continues with defaults; this can disable
-   configured authentication after a syntax or validation error. Exit before
-   opening sysrepo or a listener on parse/validation errors. Preserve built-in
-   defaults only for the documented case where the default config file is
-   absent, and test both cases.
+2. **Fail closed on invalid configuration.** *Implemented* (see *Done*):
+   ``main()`` now fails closed (``EXIT_FAILURE`` before opening sysrepo or
+   binding a listener) when a config file exists but fails to parse or fails
+   range validation, so an invalid syntax or out-of-range value never
+   silently disables configured authentication. An absent config is the sole
+   documented exception: the server falls back to its built-in defaults and
+   serves. Tested through the HTTP layer: absent config serves, syntax error
+   and out-of-range value both fail closed (no ``HTTP 200``).
 
 P1 — Interoperability and deployment verification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

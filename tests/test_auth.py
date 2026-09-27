@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import pytest
 
-from .conftest import MCP_LEGACY_PROTOCOL_VERSION, McpClient
+from .conftest import MCP_LEGACY_PROTOCOL_VERSION, McpClient, FailClosedResult
 
 # -----------------------------------------------------------------------
 # JSON-RPC error codes (the JSON-RPC 2.0 specification)
@@ -332,3 +332,27 @@ def test_find_key_longer_rejected(mcp_auth: McpClient) -> None:
     )
 
     assert response.status == 401
+
+
+def test_fail_closed_on_invalid_config(fail_closed: FailClosedResult) -> None:
+    """
+    main() must fail closed when the config file exists but will not parse
+    (syntax) or fails range validation: the server refuses to serve anything.
+    An absent config is the one documented exception, where the server falls
+    back to its built-in defaults and serves.
+
+    The fail-closed case never reaches sysrepo_open(), so the server never
+    holds the repository; probing it and observing that it does not answer
+    HTTP 200 to get_status is the whole test.
+    """
+    if fail_closed.mode == "absent":
+        assert fail_closed.served, (
+            "an absent config file must fall back to the built-in defaults and "
+            "serve; the server refused the request instead"
+        )
+        return
+
+    assert not fail_closed.served, (
+        f"{fail_closed.mode} config must make the server fail closed, but it "
+        "answered HTTP 200 to get_status"
+    )
