@@ -214,3 +214,27 @@ LGPL-3.0-only. Chaque fichier source porte son tag
 `SPDX-License-Identifier: LGPL-3.0-only`. Les bibliothèques linkées ont
 d'autres licences (sysrepo et libyang en BSD-3-Clause) : voir
 `sphinx/license.rst`.
+
+## Attribution des commits et des PR
+
+Seuls les **commits** créés par un agent s'attribuent — et *seulement dans le
+message de commit*, **jamais** dans la documentation `sphinx/` ni dans le code :
+
+~~~
+Agent: <nom de l'outil CLI de la session>
+Model: <nom du modèle de la session>
+~~~
+
+`<nom de l'outil CLI de la session>` est l'agent (le hâble) qui opère :
+`Claude Code`, `Codex`, `OpenHands`, … ; `<nom du modèle de la session>` est le
+modèle indiqué dans le bloc d'environnement de la session en cours (par ex.
+`ornith-ai/Ornith-1.5-…`).
+
+Ces deux champs **reflètent** l'état de la session en cours : ils ne doivent
+**jamais** être écrits en dur à « Claude Code ». Si la session tourne sur `Codex`
+ou `OpenHands`, ils portent le nom de l'outil et du modèle réels. Ce n'est pas
+un tag GPL ni une licence : c'est la signature de ce qui a exécuté
+l'opération.
+
+Les `PR` ne portent aucune ligne d'attribution — l'attribution vit dans le
+commit, pas dans le corps de la demande de fusion.
