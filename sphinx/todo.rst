@@ -50,6 +50,12 @@ Done
   ``sr_module_uninstall``.
 - Introspection: ``get_status``, ``get_schema``.
 - ``SR_ERR_*`` mapped onto distinct JSON-RPC codes.
+- API-key lookup constant-time: ``mcp_config_find_key()`` scans every
+  configured credential over a fixed width (``CONFIG_SYSREPO_MCP_SERVER_MAX_API_KEY_LEN``,
+  256 bytes by default, raised only if a configured key is longer) without
+  returning early on a byte or a match, folds length mismatch into the
+  accumulated result so a shorter key never matches a longer one by prefix,
+  and ``mcp_config_load()`` rejects any configured key beyond the maximum.
 - Source file split: ``main.c`` (FastCGI entry point, tool catalogue),
   ``config.c`` (``mcp_config_set()``/``mcp_config_get()``, sysrepo_open/close),
   ``libconfig.c`` (libconfig file parser into ``struct mcp_config``),
@@ -69,17 +75,16 @@ under *Done* above and documented in the corresponding API/architecture pages.
 P0 — Security and fail-closed startup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. **Make API-key lookup constant-time.** ``mcp_config_find_key()`` currently
-   compares every byte up to the longer input, so runtime still depends on
-   key length. Use a fixed maximum key length and scan the full configured
-   credential set without returning early on a byte or key match. Include
-   length mismatch in the accumulated result. Reject configured keys beyond
-   the maximum. Add tests for a valid key, a same-prefix wrong key, shorter
-   and longer keys, and matches at the first and last configured entries.
-   Do not hash keys: the user explicitly rejected SHA-256 as unnecessary CPU
-   cost. Keys therefore remain plaintext in the config file and process
-   memory; require high-entropy values, restrictive config-file permissions,
-   and never log credentials.
+1. **Make API-key lookup constant-time.** *Implemented* (see *Done*):
+   ``mcp_config_find_key()`` now scans every configured credential over
+   ``CONFIG_SYSREPO_MCP_SERVER_MAX_API_KEY_LEN`` bytes without returning early,
+   folds length mismatch into the result, and rejects configured keys beyond
+   the maximum at load time. Tested through the HTTP layer: valid key at the
+   first, middle and last configured entries, same-prefix wrong key, shorter
+   and longer keys (all rejected). Keys remain plaintext in the config file
+   and process memory (SHA-256 rejected by the user as unnecessary CPU cost);
+   require high-entropy values, restrictive config-file permissions, and
+   never log credentials.
 
 2. **Fail closed on invalid configuration.** ``main()`` currently warns when
    ``mcp_config_load()`` fails and continues with defaults; this can disable

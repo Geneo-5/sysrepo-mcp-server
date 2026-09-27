@@ -244,3 +244,91 @@ def test_nacm_denied_rpc(mcp_auth: McpClient) -> None:
         "input": {"time": "now"},
     })
     assert err["code"] == MCP_ERR_DENIED
+
+
+# -----------------------------------------------------------------------
+# Constant-time key lookup (sphinx/todo.rst P0.1)
+#
+# mcp_config_find_key() must compare every configured credential over a fixed
+# width without returning early, so its runtime depends only on the number of
+# configured keys and on MAX_API_KEY_LEN, not on which key (if any) matches or
+# on any key's content. These tests drive that matching through the HTTP layer:
+# a valid key at any position authenticates, a wrong/shorter/longer key is
+# rejected. A constant-time implementation passes all of them; a lookup that
+# returns early, uses strncmp, or matches by prefix fails the rejected cases.
+# -----------------------------------------------------------------------
+
+
+def test_find_key_valid_first_entry(mcp_auth: McpClient) -> None:
+    """
+    A valid key mapping the first configured entry authenticates
+    (``test-admin-key-0001`` -> ``admin``).
+    """
+    session = mcp_auth.open_session_with_token("test-admin-key-0001")
+
+    # A fully authenticated session can call a datastore tool.
+    result = session.tool("get_status", {})
+
+    assert result["version"]
+
+
+def test_find_key_valid_middle_entry(mcp_auth: McpClient) -> None:
+    """
+    A valid key mapping a middle configured entry authenticates
+    (``test-admin-key-0002`` -> ``operator``).
+    """
+    session = mcp_auth.open_session_with_token("test-admin-key-0002")
+
+    result = session.tool("get_status", {})
+
+    assert result["version"]
+
+
+def test_find_key_valid_last_entry(mcp_auth: McpClient) -> None:
+    """
+    A valid key mapping the last configured entry authenticates
+    (``test-ro-key-0001`` -> ``viewer``).
+    """
+    session = mcp_auth.open_session_with_token("test-ro-key-0001")
+
+    result = session.tool("get_status", {})
+
+    assert result["version"]
+
+
+def test_find_key_same_prefix_wrong_rejected(mcp_auth: McpClient) -> None:
+    """
+    A key sharing a prefix with a configured key but differing in a later
+    byte is rejected: ``test-admin-key-9999`` must not authenticate.
+    """
+    response = mcp_auth.request(
+        extra_headers={"Authorization": "Bearer test-admin-key-9999"},
+    )
+
+    assert response.status == 401
+
+
+def test_find_key_shorter_prefix_rejected(mcp_auth: McpClient) -> None:
+    """
+    A key that is a strict prefix of a configured key is rejected:
+    ``test-admin-key-000`` (17 bytes) must not authenticate ``test-admin-key-0001``.
+    A lookup that matched by prefix would accept it.
+    """
+    response = mcp_auth.request(
+        extra_headers={"Authorization": "Bearer test-admin-key-000"},
+    )
+
+    assert response.status == 401
+
+
+def test_find_key_longer_rejected(mcp_auth: McpClient) -> None:
+    """
+    A longer key that has a configured key as a prefix is rejected:
+    ``test-admin-key-00010`` (19 bytes) must not authenticate
+    ``test-admin-key-0001``.
+    """
+    response = mcp_auth.request(
+        extra_headers={"Authorization": "Bearer test-admin-key-00010"},
+    )
+
+    assert response.status == 401

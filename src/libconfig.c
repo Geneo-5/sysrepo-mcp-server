@@ -304,6 +304,16 @@ load_auth(config_t *cc, struct mcp_config *cfg)
 			free(list);
 			return -1;
 		}
+		if (strlen(key_str) > CONFIG_SYSREPO_MCP_SERVER_MAX_API_KEY_LEN) {
+			mcp_log_err("libconfig: server.auth.api_keys[%d].key is %zu "
+				    "bytes, over the maximum of %d; configure a shorter "
+				    "key or raise SYSREPO_MCP_SERVER_MAX_API_KEY_LEN",
+				    i, strlen(key_str),
+				    CONFIG_SYSREPO_MCP_SERVER_MAX_API_KEY_LEN);
+			free(list);
+			return -1;
+		}
+
 		list[i].key  = xstrdup(key_str);
 		list[i].user = xstrdup(user_str);
 		if (list[i].key == NULL || list[i].user == NULL) {
@@ -408,23 +418,42 @@ const char *
 mcp_config_find_key(const struct mcp_config *cfg, const char *key)
 {
 	size_t i, j;
+	const char *matched_user = NULL;
+	size_t key_len = key == NULL ? 0 : strlen(key);
 
+	/* An oversized input cannot match any bounded configured key. Reject
+	 * it without revealing by how much it exceeds the limit: the branch
+	 * depends only on the input length, never on its content, and the
+	 * configured keys are themselves bounded (see mcp_config_load). */
+	if (key_len > CONFIG_SYSREPO_MCP_SERVER_MAX_API_KEY_LEN)
+		return NULL;
+
+	/* Scan every configured key over the full fixed width, never returning
+	 * early on a byte or on a match, so the total runtime depends only on
+	 * the number of configured keys and on MAX_API_KEY_LEN -- not on which
+	 * key (if any) matches, nor on any key's content. Each configured key
+	 * is compared as its MAX_API_KEY_LEN-byte form: bytes past its own
+	 * length count as 0, and the length difference is folded into the
+	 * accumulated result, so a shorter key can never match a longer one by
+	 * prefix. */
 	for (i = 0; i < cfg->api_key_count; i++) {
 		const char *stored = cfg->api_keys[i].key;
-		const char *given = key;
-		size_t stored_len = strlen(stored);
-		size_t given_len = strlen(given);
-		int different = (int)(stored_len ^ given_len);
+		size_t       stored_len = strlen(stored);
+		unsigned     different = (unsigned)(stored_len ^ key_len);
 
-		/* Compare every byte regardless of length difference */
-		for (j = 0; j < (stored_len > given_len ? stored_len : given_len);
-		     j++) {
-			if (j < stored_len && j < given_len)
-				different |= (unsigned char)stored[j]
-				           ^ (unsigned char)given[j];
+		for (j = 0; j < CONFIG_SYSREPO_MCP_SERVER_MAX_API_KEY_LEN; j++) {
+			unsigned sb = (j < stored_len) ? (unsigned char)stored[j] : 0U;
+			unsigned gb = (j < key_len)    ? (unsigned char)key[j]    : 0U;
+
+			different |= (sb ^ gb);
 		}
-		if (different == 0)
-			return cfg->api_keys[i].user;
+
+		/* Record the user of the first key that matches, but keep the
+		 * scan: the value returned is chosen after the whole loop, so
+		 * no configured key is ever skipped and every match costs the
+		 * same. */
+		if (matched_user == NULL && different == 0U)
+			matched_user = cfg->api_keys[i].user;
 	}
-	return NULL;
+	return matched_user;
 }

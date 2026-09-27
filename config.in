@@ -51,3 +51,15 @@ config SYSREPO_MCP_SERVER_SESSION_ID_LEN
 
 		A 32-character ID carries 128 bits of entropy from
 		/dev/urandom, which is sufficient to prevent guessing.
+
+	config SYSREPO_MCP_SERVER_MAX_API_KEY_LEN
+	int
+	range 16 4096
+	default 256
+	help
+		Maximum length, in bytes, of a configured API key.
+
+		API keys stay plaintext in the libconfig file and in process
+		memory (no hashing, per project policy). This bounds the
+		fixed-width, constant-time lookup used by mcp_config_find_key(),
+		and rejects any configured key longer than it at load time.
