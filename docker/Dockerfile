@@ -179,7 +179,7 @@ RUN --mount=type=bind,source=extern/fcgi2,target=/src/fcgi2,readonly \
 # /usr. Both prefixes must stay searchable: overwriting PKG_CONFIG_PATH with
 # /usr/lib/pkgconfig alone hides libyang.pc and sysrepo.pc, and `pkg-config
 # --libs sysrepo` then silently returns nothing.
-ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+ENV PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
 
 # --- 2.5 stroll (data structures) --------------------------------------------
 RUN --mount=type=bind,source=extern/stroll,target=/src/stroll,readonly \
