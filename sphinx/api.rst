@@ -1489,12 +1489,11 @@ The implementation-defined range, ``-32000`` to ``-32099``, as defined in
 
 .. warning::
 
-   A missing or unknown API key is **not** reported with a code from this
-   table: it currently reuses ``-32603`` (Internal error) with the message
-   "Unauthorized" and HTTP 401 (``method_initialize()`` and ``serve()`` in
-   ``transport.c``). This conflates a client-caused condition with the code
-   meant for unexpected server-side failure; choosing and documenting a
-   replacement is tracked as P1.2 in :doc:`todo`.
+   A missing or unknown API key is reported with ``-32003`` (Denied) and
+   HTTP 401 (``method_initialize()`` and ``serve()`` in ``transport.c``).
+   It is deliberately *not* ``-32603`` (Internal error): a client-caused
+   condition is reported with the denial code, not the code reserved for
+   unexpected server-side failure.
 
 .. note::
 

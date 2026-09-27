@@ -222,7 +222,7 @@ method_initialize(FCGX_Request *req, struct json_object *id,
 	if (cfg->auth_method > 0 && !user) {
 		struct mcp_err err;
 
-		mcp_err_set(&err, MCP_ERR_INTERNAL, "Unauthorized",
+		mcp_err_set(&err, MCP_ERR_DENIED, "Unauthorized",
 			    "missing or invalid API key");
 		rpc_send_error(req, 401, id, &err);
 		return;
@@ -731,7 +731,7 @@ serve(FCGX_Request *req)
 			user = mcp_config_find_key(cfg, credential);
 		if (cfg->auth_method > 0 && !user) {
 			struct mcp_err err;
-			mcp_err_set(&err, MCP_ERR_INTERNAL, "Unauthorized",
+			mcp_err_set(&err, MCP_ERR_DENIED, "Unauthorized",
 			            "missing or invalid API key");
 			rpc_send_error(req, 401, NULL, &err);
 			return;
@@ -785,7 +785,7 @@ serve(FCGX_Request *req)
 	if (cfg->auth_method > 0 && !sid && !mcp && !user) {
 		struct mcp_err err;
 
-		mcp_err_set(&err, MCP_ERR_INTERNAL, "Unauthorized",
+		mcp_err_set(&err, MCP_ERR_DENIED, "Unauthorized",
 		            "missing or invalid API key");
 		rpc_send_error(req, 401, NULL, &err);
 		return;

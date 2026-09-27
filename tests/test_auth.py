@@ -64,7 +64,7 @@ def test_initialize_no_credential(mcp_auth: McpClient) -> None:
     payload = response.json()
 
     assert "error" in payload
-    assert payload["error"]["code"] == MCP_ERR_INTERNAL
+    assert payload["error"]["code"] == MCP_ERR_DENIED
     assert "Unauthorized" in payload["error"]["message"]
 
 
@@ -110,7 +110,7 @@ def test_initialize_invalid_credential(mcp_auth: McpClient) -> None:
 
     payload = response.json()
 
-    assert payload["error"]["code"] == MCP_ERR_INTERNAL
+    assert payload["error"]["code"] == MCP_ERR_DENIED
 
 
 def test_tool_call_without_auth(mcp_auth: McpClient) -> None:
@@ -136,7 +136,7 @@ def test_tool_call_without_auth(mcp_auth: McpClient) -> None:
 
     payload = response.json()
 
-    assert payload["error"]["code"] == MCP_ERR_INTERNAL
+    assert payload["error"]["code"] == MCP_ERR_DENIED
 
 
 def test_module_install_denied(mcp_auth: McpClient) -> None:
