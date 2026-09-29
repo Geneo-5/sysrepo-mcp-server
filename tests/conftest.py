@@ -799,9 +799,9 @@ server.pid-file      = "{pidfile}"
 fastcgi.debug=65535
 debug.log-request-header = "enable"       # Log les entêtes des requêtes reçues
 debug.log-response-header = "enable"      # Log les entêtes des réponses envoyées
-debug.log-request-handling = "enable"     # Log le cheminement interne de la requête
-debug.log-file-not-found = "enable"       # Log l'origine des erreurs 404
-debug.log-condition-handling = "enable"   # Log l'évaluation des conditions (vhosts, etc.)
+#debug.log-request-handling = "enable"     # Log le cheminement interne de la requête
+#debug.log-file-not-found = "enable"       # Log l'origine des erreurs 404
+#debug.log-condition-handling = "enable"   # Log l'évaluation des conditions (vhosts, etc.)
 
 # 0 means no limit: the oversized-body rejection under test belongs to
 # sysrepo-mcp, and lighttpd must not answer 413 in its place.

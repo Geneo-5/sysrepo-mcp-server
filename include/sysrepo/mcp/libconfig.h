@@ -87,6 +87,8 @@ struct mcp_config {
 	int  log_level;			/* server.log.level */
 	int  log_verbose;		/* server.log.verbose */
 	int  log_console;		/* server.log.console */
+	int  sysrepo_log_enabled;	/* server.log.sysrepo: forward sysrepo's own
+					 * log onto this server, or not */
 	char log_file[256];		/* server.log.file */
 };
 

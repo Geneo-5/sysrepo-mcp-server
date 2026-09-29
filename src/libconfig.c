@@ -153,6 +153,7 @@ mcp_config_set_defaults(struct mcp_config *cfg)
 	cfg->log_level       = 6;
 	cfg->log_verbose     = 0;
 	cfg->log_console     = 1;
+	cfg->sysrepo_log_enabled = 1;
 	copy_string(cfg->log_file, sizeof(cfg->log_file),
 	            "/var/log/sysrepo-mcp.log");
 }
@@ -356,6 +357,8 @@ load_log(config_t *cc, struct mcp_config *cfg)
 		cfg->log_verbose = b;
 	if (config_lookup_bool(cc, "server.log.console", &b))
 		cfg->log_console = b;
+	if (config_lookup_bool(cc, "server.log.sysrepo", &b))
+		cfg->sysrepo_log_enabled = b;
 	if (config_lookup_string(cc, "server.log.file", &str))
 		copy_string(cfg->log_file, sizeof(cfg->log_file), str);
 	return 0;

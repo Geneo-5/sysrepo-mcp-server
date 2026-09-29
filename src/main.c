@@ -259,6 +259,7 @@ static void
 on_signal(int signum)
 {
 	(void)signum;
+	mcp_log_debug("receive signal %d", signum);
 	stopping = 1;
 	FCGX_ShutdownPending();
 }

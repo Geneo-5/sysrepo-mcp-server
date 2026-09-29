@@ -180,7 +180,9 @@ mcp_log_init(const struct mcp_config *config)
 	if (file_error)
 		mcp_log_warn("cannot open log file %s: %s", config->log_file,
 		             strerror(file_error));
-	sr_log_set_cb(sysrepo_log_callback);
+	/* Forward sysrepo's own log onto this server, unless disabled: sysrepo logs
+	 * at verbose/debug level, and turns off cleanly with sr_log_set_cb(NULL). */
+	sr_log_set_cb(config->sysrepo_log_enabled ? sysrepo_log_callback : NULL);
 	return 0;
 
 fail:

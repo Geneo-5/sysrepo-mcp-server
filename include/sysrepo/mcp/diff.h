@@ -14,9 +14,9 @@ struct tool_ctx;
 struct mcp_err;
 
 /*
- * sr_diff_config: read two datastore subtrees (default running -> candidate),
- * compute the libyang diff between them, and return a flat list of the
- * leaf-level changes. See sphinx/api.rst.
+ * sr_diff_config: read two datastore subtrees ("source" and "destination",
+ * both required and different), compute the libyang diff between them, and
+ * return a flat list of the changes. See sphinx/api.rst.
  */
 struct json_object *tool_sr_diff_config(struct tool_ctx *ctx,
                                         struct json_object *args,
