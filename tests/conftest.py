@@ -383,6 +383,12 @@ class McpClient:
     def delete_config(self, xpath: str, **kwargs: Any) -> dict:
         return self.tool("sr_delete_config", {"xpath": xpath, **kwargs})
 
+    def diff(self, source: str, destination: str, **kwargs: Any) -> dict:
+        return self.tool(
+            "sr_diff_config",
+            {"source": source, "destination": destination, **kwargs},
+        )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures: sysrepo repository

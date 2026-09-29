@@ -28,6 +28,12 @@ struct json_object *tool_sr_copy_config(struct tool_ctx *ctx,
 					struct json_object *args,
 					struct mcp_err *err);
 
+/* Read an sr_datastore_t from a "running|startup|candidate" argument,
+ * reporting a param error when it is missing or unknown. */
+int copy_datastore_arg(struct json_object *args, const char *key,
+		       sr_datastore_t *datastore, const char **name,
+		       struct mcp_err *err);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

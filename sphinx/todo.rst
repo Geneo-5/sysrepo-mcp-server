@@ -146,21 +146,22 @@ P2 — Protocol and agent capabilities
    default. If browser clients are required, add an explicit origin allow-list
    in runtime configuration, validate it before processing requests, and test
    allowed, rejected, and absent origins. Keep the default deny behavior.
-3. **Implement ``sr_diff_config``.** Compare two conventional datastores and
-   return the documented flat ``diff`` array. Read both trees with
-   ``sr_get_data()`` and compute changes with ``lyd_diff_siblings()``.
+3. **Implement ``sr_diff_config``.** Done (P2.3). Compare two conventional
+   datastores and return the documented flat ``diff`` array, computed with
+   ``lyd_diff_siblings()``.
 
-   a. Build ``diff_to_json()`` using the XPath construction logic shared with
-      ``tree_to_json()``.
-   b. Decide and document whether depth limits apply during reads or after
-      diffing; the current API description assumes the former, which can hide
-      changes below the cutoff.
-   c. Include ``previous_position`` for moved entries in user-ordered lists
-      and leaf-lists using libyang's ``yang:key``/``yang:value``/
-      ``yang:position`` metadata.
-   d. Reject identical source and target datastores with ``-32602``.
-   e. Test changed leaves, added/removed/reordered list entries, and no-op
-      results.
+   a. Built ``diff_to_json()`` reusing the XPath logic from ``tree_to_json()``.
+   b. ``max_depth`` applies to the reads of each side, before diffing,
+      matching the API description.
+   d. Identical source and target datastores return ``-32602`` (invalid
+      params).
+   e. Covered by ``tests/test_diff.py``: no-op, created, deleted, replaced,
+      and a default-value leaf.
+
+   ``previous_position`` for user-ordered lists and leaf-lists (libyang's
+   ``yang:key``/``yang:value``/``yang:position`` metadata) stays planned: the
+   model under test (the oven) has no such list, so the tests cannot exercise
+   it. It waits on ``yang:position`` support.
 
 P3 — Verification and release quality
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

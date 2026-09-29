@@ -41,6 +41,7 @@
 #include <sysrepo/mcp/schema.h>
 #include <sysrepo/mcp/status.h>
 #include <sysrepo/mcp/log.h>
+#include <sysrepo/mcp/diff.h>
 
 /* --------------------------------------------------------------------- globals
  *
@@ -110,6 +111,20 @@ const struct tool_desc tools[] = {
 		"\"running\",\"startup\",\"candidate\"]}},"
 		"\"required\":[\"source\",\"destination\"]}",
 		tool_sr_copy_config, 1
+	},
+	{
+		"sr_diff_config",
+		"Diff two datastore subtrees; return the leaf-level changes.",
+		"{\"type\":\"object\",\"properties\":{"
+		"\"source\":{\"type\":\"string\",\"enum\":["
+		"\"running\",\"startup\",\"candidate\"]},"
+		"\"destination\":{\"type\":\"string\",\"enum\":["
+		"\"running\",\"startup\",\"candidate\"]},"
+		"\"xpath\":{\"type\":\"string\"},"
+		"\"max_depth\":{\"type\":\"integer\",\"minimum\":0,"
+		"\"default\":0}},"
+		"\"required\":[\"source\",\"destination\"]}",
+		tool_sr_diff_config, 1
 	},
 	{
 		"sr_get_operational",

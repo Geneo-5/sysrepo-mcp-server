@@ -320,7 +320,7 @@ Tool catalogue
      - implemented
      - Replace one datastore with another
    * - ``sr_diff_config``
-     - planned
+     - implemented
      - Compare two datastores over a subtree
    * - ``sr_get_operational``
      - implemented
@@ -633,21 +633,21 @@ copies the complete datastore; it has no module or XPath filter.
 sr_diff_config
 ~~~~~~~~~~~~~~
 
-*Status: planned.* Compares two datastores over a subtree and reports what
+*Status: implemented.* Compares two datastores over a subtree and reports what
 differs, by reading both sides with ``sr_get_data()`` and handing the two
 trees to libyang's ``lyd_diff_siblings()``.
 
 This is not a sysrepo concept: sysrepo has no dry-run operation. The closest
 thing today is writing to ``candidate``, validating it, then comparing it
 against ``running`` by hand — exactly what this tool is meant to automate.
-See :doc:`todo`, P5, for the planning note.
+See :doc:`todo`, P2.3, for the planning note.
 
 **Arguments**
 
 ``source`` (string, required)
    ``running``, ``startup`` or ``candidate``.
 
-``target`` (string, required)
+``destination`` (string, required)
    ``running``, ``startup`` or ``candidate``, different from ``source``.
 
 ``xpath`` (string, optional)
@@ -660,29 +660,24 @@ See :doc:`todo`, P5, for the planning note.
 **Result**
 
 ``diff`` (array of objects)
-   One entry per changed node, each with:
+   One entry per changed leaf, each with:
 
    ``xpath`` (string)
       Full path of the node, exactly as ``get_schema``
       reports it.
 
    ``operation`` (string)
-      ``created``, ``deleted``, ``replaced`` or ``moved`` — libyang's
-      ``LYD_DIFF_OP_*`` by name.
+      ``created``, ``deleted`` or ``replaced``. libyang reports every leaf
+      change (default-value crossings included) as a plain ``replace``; the
+      tool decides ``created`` or ``deleted`` from whether the old side was a
+      default value and whether the new one is.
 
    ``value``
-      The node's new value or subtree for ``created``/``replaced``, as a
+      The node's new value or subtree, for ``created`` and ``replaced``, as a
       libyang JSON value or object. Absent for ``deleted``.
 
    ``previous_value``
-      The value being replaced or deleted, for a leaf or leaf-list entry.
-      Absent for ``created``.
-
-   ``previous_position`` (string, optional)
-      For a ``moved`` entry in a user-ordered list or leaf-list: the
-      preceding sibling's key predicate or value, taken from libyang's
-      ``yang:key``/``yang:value`` diff metadata. Absent for a system-ordered
-      list, since sysrepo reports no position for those.
+      The value being replaced or deleted, for a leaf. Absent for ``created``.
 
 ``source`` (string), ``target`` (string), ``xpath`` (string)
    Echo of the request.
@@ -700,7 +695,7 @@ See :doc:`todo`, P5, for the planning note.
            "name": "sr_diff_config",
            "arguments": {
                "source": "running",
-               "target": "candidate",
+               "destination": "candidate",
                "xpath": "/oven:oven"
            }
        }
@@ -734,7 +729,10 @@ See :doc:`todo`, P5, for the planning note.
    between the two reads can produce a diff that never existed as one
    consistent snapshot. Acceptable for an agent comparing ``running``
    against a ``candidate`` it just finished editing itself; not a substitute
-   for a real transaction (see :doc:`todo`, P4).
+   for a real transaction (see :doc:`todo`, P2.3).
+
+   Identical source and target datastores return ``-32602`` (invalid params):
+   diffing a datastore against itself is a usage error, not an empty diff.
 
 Operational data
 ----------------

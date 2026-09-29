@@ -39,7 +39,7 @@ edit_node_count(const struct lyd_node *node)
 	return count;
 }
 
-static int
+int
 copy_datastore_arg(struct json_object *args, const char *key,
 		   sr_datastore_t *datastore, const char **name,
 		   struct mcp_err *err)
