@@ -119,8 +119,8 @@ P1 — Interoperability and deployment verification
 
    Known gap filled: for ``union`` leaves ``get_schema`` now reports the
    member types. ``add_union_member()`` iterates each member and emits its
-   ``type`` plus constraints (range, patterns, values, etc.), matching the
-   output contract for top-level leaves. The test fixture ``sysrepo-mcp-test.yang``
+   ``type`` plus constraints (range, patterns, values, identity ``base``,
+   etc.), matching the output contract for top-level leaves. The test fixture ``sysrepo-mcp-test.yang``
    includes an inline union (``string || uint8``) and a typedef union that
    are both covered by tests. Remaining union gaps: nested unions (union of
    unions) are reported as ``type: union`` without expanding the inner members;

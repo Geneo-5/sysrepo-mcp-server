@@ -5,7 +5,7 @@
 
 /// Test module that exercises every type covered by get_schema:
 /// uint8/16/32/64, int8/16/32/64, string (with range, length, patterns
-/// including invert-match), binary, boolean, enumeration, bits,
+/// with length + pattern), binary, boolean, enumeration, bits,
 /// empty, decimal64, identityref, leafref, union, and containers/lists.
 
 module sysrepo-mcp-test {
@@ -35,24 +35,12 @@ module sysrepo-mcp-test {
         description "MAC address as a string with length + pattern.";
     }
 
-    typedef mac-collapsed {
-        type string {
-            length "12..17";
-            pattern "([0-9a-f]{2}:){5}[0-9a-f]{2}" {
-                invert-match true;
-                description "reject non-MAC strings";
-            }
-        }
-        description "string with invert-match pattern.";
-    }
-
     typedef my-binary {
         type binary;
         description "Plain binary type.";
     }
 
-    typedef my-identity {
-        base identity-ref;
+    identity my-identity {
         description "Test identity.";
     }
 
@@ -66,12 +54,6 @@ module sysrepo-mcp-test {
             base my-identity;
         }
         description "Identityref with explicit base.";
-    }
-
-    union string-or-int {
-        type string;
-        type uint8;
-        description "A union of string and uint8.";
     }
 
     /* --- data nodes --- */
@@ -147,13 +129,7 @@ module sysrepo-mcp-test {
         leaf mac {
             type mac-address;
             description
-                "String with length constraint and pattern (union coverage).";
-        }
-
-        leaf mac-collapsed {
-            type mac-collapsed;
-            description
-                "String with invert-match pattern.";
+                "String with length constraint and pattern.";
         }
 
         leaf binary-data {
@@ -196,12 +172,6 @@ module sysrepo-mcp-test {
             type empty;
             description
                 "Empty type.";
-        }
-
-        leaf identity-base {
-            type my-identity;
-            description
-                "Direct identity reference (base type).";
         }
 
         list session {

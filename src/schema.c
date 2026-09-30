@@ -524,6 +524,10 @@ add_union_member(struct json_object *members, const struct lysc_type *type)
 	json_object_object_add(member, "type",
 	                       json_object_new_string(basetype_name(type->basetype)));
 
+	json_object_object_add(member, "values", json_object_new_array());
+	json_object_object_add(member, "patterns", json_object_new_array());
+	json_object_object_add(member, "base", json_object_new_array());
+
 	switch (type->basetype) {
 	case LY_TYPE_BINARY:
 		bin = (struct lysc_type_bin *)type;
@@ -558,6 +562,8 @@ add_union_member(struct json_object *members, const struct lysc_type *type)
 				json_object_object_add(obj, "reference",
 					json_object_new_string(str->patterns[u]->ref));
 
+			json_object_array_add(
+				json_object_object_get(member, "patterns"), obj);
 		}
 		break;
 	case LY_TYPE_BITS:
@@ -639,7 +645,7 @@ add_leaf_help(struct json_object *res, const struct lysc_type *type)
 	}
 	case LY_TYPE_STRING: {
 		struct lysc_type_str *str = (struct lysc_type_str *)type;
-		struct json_object *values = json_object_new_array();
+		struct json_object *patterns = json_object_object_get(res, "patterns");
 
 		res_add_range(res, str->length, type->basetype);
 
@@ -657,38 +663,18 @@ add_leaf_help(struct json_object *res, const struct lysc_type *type)
 				json_object_object_add(obj, "reference",
 					json_object_new_string(str->patterns[u]->ref));
 
-			json_object_array_add(values, obj);
-		}
-		{
-			LY_ARRAY_COUNT_TYPE v;
-			struct json_object *patterns = json_object_object_get(res, "patterns");
-
-			for (v = 0; v < json_object_array_length(values); v++)
-				json_object_array_add(patterns,
-					json_object_array_get_idx(values, v));
-			json_object_put(values);
+			json_object_array_add(patterns, obj);
 		}
 		break;
 	}
 	case LY_TYPE_BITS:
 	case LY_TYPE_ENUM: {
 		struct lysc_type_bits *bits = (struct lysc_type_bits *)type;
-		struct json_object *values = json_object_new_array();
+		struct json_object *values = json_object_object_get(res, "values");
 
-		LY_ARRAY_FOR(bits->bits, u) {
+		LY_ARRAY_FOR(bits->bits, u)
 			json_object_array_add(values,
 				json_object_new_string(bits->bits[u].name));
-		}
-
-		{
-			LY_ARRAY_COUNT_TYPE v;
-			struct json_object *values2 = json_object_object_get(res, "values");
-
-			for (v = 0; v < json_object_array_length(values); v++)
-				json_object_array_add(values2,
-					json_object_array_get_idx(values, v));
-			json_object_put(values);
-		}
 		break;
 	}
 	case LY_TYPE_BOOL:
@@ -704,22 +690,11 @@ add_leaf_help(struct json_object *res, const struct lysc_type *type)
 	}
 	case LY_TYPE_IDENT: {
 		struct lysc_type_identityref *ident = (struct lysc_type_identityref *)type;
-		struct json_object *values = json_object_new_array();
+		struct json_object *base = json_object_object_get(res, "base");
 
-		LY_ARRAY_FOR(ident->bases, u) {
-			json_object_array_add(values,
+		LY_ARRAY_FOR(ident->bases, u)
+			json_object_array_add(base,
 				json_object_new_string(ident->bases[u]->name));
-		}
-
-		{
-			LY_ARRAY_COUNT_TYPE v;
-			struct json_object *base = json_object_object_get(res, "base");
-
-			for (v = 0; v < json_object_array_length(values); v++)
-				json_object_array_add(base,
-					json_object_array_get_idx(values, v));
-			json_object_put(values);
-		}
 		break;
 	}
 	case LY_TYPE_INST: {
