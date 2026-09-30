@@ -8,6 +8,7 @@
  * Schema introspection: get_schema and compiled node details.
  */
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -296,8 +297,75 @@ tool_get_schema(struct tool_ctx *ctx, struct json_object *args,
 	if (xpath && strcmp(xpath, "/")) {
 		selected = lys_find_path(ly, NULL, xpath, 0);
 		if (!selected) {
-			mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
-			            "no schema node matches \"%s\"", xpath);
+			struct json_object *roots = json_object_new_array();
+			char buffer[512];
+			char root[1024];
+			uint32_t idx = 0;
+			const struct lys_module *other;
+			const struct lysc_node *node;
+			const struct lys_module *want = NULL;
+			const char *colon = xpath[0] == '/' ? strchr(xpath, ':') : NULL;
+			char wname[128];
+			int shown;
+
+			/* "/module:node" names the module the agent meant. Without
+			   a known module, the roots of arbitrary modules would only
+			   be noise (internal modules come first), so none are listed. */
+			if (colon && (size_t)(colon - xpath - 1) < sizeof(wname)) {
+				memcpy(wname, xpath + 1, colon - xpath - 1);
+				wname[colon - xpath - 1] = '\0';
+				want = ly_ctx_get_module_implemented(ly, wname);
+			}
+			shown = want ? 0 : 10;
+
+			/* Point the agent at what is addressable: the root
+			   paths that actually exist, so a guessed path no
+			   longer fails into the void — it can read one back
+			   and drill into that subtree. */
+			while ((other = ly_ctx_get_module_iter(ly, &idx)) &&
+			       shown < 10) {
+				if (!other->implemented || !other->compiled ||
+				    (want && other != want))
+					continue;
+				for (node = other->compiled->data;
+				     node && shown < 10; node = node->next) {
+					snprintf(root, sizeof root, "/%s:%s",
+						other->name, node->name);
+					json_object_array_add(roots,
+						json_object_new_string(root));
+					shown++;
+				}
+				for (node = (const struct lysc_node *)other->compiled->rpcs;
+				     node && shown < 10; node = node->next) {
+					snprintf(root, sizeof root, "/%s:%s",
+						other->name, node->name);
+					json_object_array_add(roots,
+						json_object_new_string(root));
+					shown++;
+				}
+				for (node = (const struct lysc_node *)other->compiled->notifs;
+				     node && shown < 10; node = node->next) {
+					snprintf(root, sizeof root, "/%s:%s",
+						other->name, node->name);
+					json_object_array_add(roots,
+						json_object_new_string(root));
+					shown++;
+				}
+			}
+			snprintf(buffer, sizeof buffer, "%s",
+				json_object_to_json_string(roots));
+			json_object_put(roots);
+
+			if (want)
+				mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
+				            "no schema node matches \"%s\"; root paths of "
+				            "module %s: %s (use max_depth 1 to drill in)",
+				            xpath, want->name, buffer);
+			else
+				mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
+				            "no schema node matches \"%s\"; call get_schema "
+				            "without xpath and with max_depth 1 to list the "
+				            "modules and their root paths", xpath);
 			sr_session_release_context(ctx->sess);
 			return NULL;
 		}
@@ -412,8 +480,10 @@ res_add_range(struct json_object *res, const struct lysc_range *range, LY_DATA_T
 	LY_ARRAY_COUNT_TYPE u;
 	char buf[256];
 
-	if (!range)
+	if (!range) {
+		json_object_put(values);
 		return;
+	}
 
 	LY_ARRAY_FOR(range->parts, u) {
 		if (range->parts[u].max_64 == range->parts[u].min_64) {
@@ -480,7 +550,7 @@ add_leaf_help(struct json_object *res, const struct lysc_type *type)
 				json_object_object_add(obj, "description",
 		                       json_object_new_string(str->patterns[u]->dsc));
 			if (str->patterns[u]->ref)
-				json_object_object_add(res, "reference",
+				json_object_object_add(obj, "reference",
 						json_object_new_string(str->patterns[u]->ref));
 
 			json_object_array_add(values, obj);

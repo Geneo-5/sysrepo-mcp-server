@@ -112,6 +112,28 @@ def test_schema_unknown_xpath_is_not_found(mcp_oven):
     assert error["code"] == -32001
 
 
+def test_schema_unknown_node_lists_root_paths_of_its_module(mcp_oven):
+    error = mcp_oven.tool_error("get_schema", {"xpath": "/oven:no-such-node"})
+    detail = error["data"]["detail"]
+
+    assert error["code"] == -32001
+    # The agent is told which paths exist and how to drill into them, rather
+    # than being left to guess again.
+    assert "/oven:oven" in detail
+    assert "max_depth" in detail
+
+
+def test_schema_unknown_module_points_to_module_discovery(mcp_oven):
+    error = mcp_oven.tool_error(
+        "get_schema", {"xpath": "/no-such-module:node"})
+    detail = error["data"]["detail"]
+
+    assert error["code"] == -32001
+    assert "max_depth" in detail
+    # No module to anchor on: roots of unrelated modules would be noise.
+    assert "/oven:oven" not in detail
+
+
 def test_schema_rejects_negative_depth(mcp_oven):
     error = mcp_oven.tool_error("get_schema", {"max_depth": -1})
 

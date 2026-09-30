@@ -85,14 +85,6 @@ P0 — Security and fail-closed startup
    and process memory (SHA-256 rejected by the user as unnecessary CPU cost);
    require high-entropy values, restrictive config-file permissions, and
    never log credentials.
-- Fail closed on invalid configuration: ``main()`` fails closed (``EXIT_FAILURE``,
-   before ``sysrepo_open()`` and before binding a listener) when a config
-   file exists but fails to parse or fails range validation, so an invalid
-   syntax or out-of-range value never silently disables configured
-   authentication. An absent config is the sole documented exception: it
-   falls back to the built-in defaults and serves. Tested through the HTTP
-   layer: absent config serves, syntax error and out-of-range value both
-   fail closed (no ``HTTP 200``).
 
 2. **Fail closed on invalid configuration.** *Implemented* (see *Done*):
    ``main()`` now fails closed (``EXIT_FAILURE`` before opening sysrepo or
@@ -114,9 +106,17 @@ P1 — Interoperability and deployment verification
    into that subtree. The YANG prefix is metadata; the XPath first segment
    uses the module name (for the local fixture, module ``oven``, prefix
    ``ov``, path ``/oven:oven``). This flow is now documented and covered by
-   ``test_schema_can_be_explored_progressively_without_source``. Improve
-   invalid-path feedback to point to discovered root paths or this workflow,
-   and confirm it works with an agent using only MCP tools.
+   ``test_schema_can_be_explored_progressively_without_source``. The
+   invalid-path feedback is implemented in ``src/schema.c``: an unknown
+   ``xpath`` now returns *Not found*. When the path names an implemented
+   module (``/oven:no-such-node``), the error lists that module's root paths
+   (up to 10, ``/<module>:<node>``) so the agent can pick one and drill in
+   with ``max_depth: 1``; otherwise it points to ``get_schema`` without
+   ``xpath`` to list the modules. Two tests cover both cases in
+   ``tests/test_schema.py``. Remaining: build and run the Docker suite (this
+   change and its tests have not been compiled or run yet), and confirm the
+   flow with an agent using only MCP tools. Known gap: for ``union`` leaves ``get_schema`` reports only
+   ``base_type: union``, not the member types.
 
 2. **Verify the live MCP connector after deployment.** The connector reported
    that ``tools/list`` rejected missing ``ttlMs`` and ``cacheScope``. The
