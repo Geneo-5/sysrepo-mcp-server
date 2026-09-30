@@ -69,8 +69,8 @@ Agent IA  ──HTTP/TLS──►  Reverse proxy  ──FastCGI──►  sysrep
   démon sysrepo depuis la version 2. Le datastore `running` vit en mémoire
   partagée, pas dans un fichier.
 - **Le proxy peut démarrer le serveur lui-même** (lighttpd `bin-path`) : la
-  socket arrive alors sur le descripteur 0 et les options de socket de
-  `config.in` sont inutilisées.
+  socket arrive alors sur le descripteur 0 et les options de transport du
+  fichier libconfig (`server.transport`) restent inutilisées.
 
 Détail : `sphinx/architecture.rst`. Interface MCP : `sphinx/api.rst`.
 
@@ -99,8 +99,10 @@ ne se bumpent pas séparément.
 ## Sessions et notifications : pièges connus
 
 - **Une session est locale au processus.** Elle porte ses abonnements sysrepo
-  et sa file d'attente. `max-procs` doit rester à 1 tant que le stockage n'est
-  pas partagé (roadmap, milestone 1).
+  et sa file d'attente. `max-procs = 1` est le déploiement voulu, pas un
+  plafond de débit à lever : un magasin de sessions partagé et plusieurs
+  agents concurrents sont hors périmètre (voir *Not planned* dans
+  `sphinx/todo.rst`).
 - **`SR_SUBSCR_NO_THREAD` est structurant.** Les abonnements sont créés sans
   fil d'exécution sysrepo, et `sr_subscription_process_events()` est appelé au
   début de chaque requête. Le serveur reste mono-thread : pas de verrou sur la
@@ -179,28 +181,35 @@ erreur. Vérifier avant de commiter une modification de `sphinx/`.
 
 Deux niveaux, à ne pas confondre :
 
-- **`config.in`** (Kconfig) : options figées à la compilation. Transport, type
-  de credential, interrupteurs de contrôle d'accès, chemin du dépôt sysrepo,
-  journalisation, et les limites de session (nombre maximum, TTL d'inactivité,
-  taille de la file de notifications).
-- **`yang/sysrepo-mcp.yang`** : configuration modifiable à chaud (les clés
-  d'API) et état opérationnel. Lue et écrite via le datastore, donc soumise à
-  NACM comme n'importe quelle donnée.
+- **`config.in`** (Kconfig) : uniquement les options figées à la compilation.
+  Nom et version du paquet, chemin du dépôt sysrepo, longueur des identifiants
+  de session et longueur maximale d'une clé d'API.
+- **Fichier libconfig** (`docker/sysrepo-mcp.conf` par défaut, `--config
+  <fichier>` pour en choisir un autre) : tout le reste à l'exécution, à savoir
+  transport, authentification et clés d'API (`auth.api_keys[]`), limites de
+  session, journalisation. Il est lu une seule fois au démarrage par
+  `src/libconfig.c`.
 
-Les limites de session sont en Kconfig parce que le magasin de sessions est un
-tableau fixe dans le processus. Les déplacer vers le modèle YANG fait partie du
-milestone 1.
+Un fichier présent mais invalide (syntaxe ou valeur hors plage) fait échouer
+le démarrage (*fail closed*) : le serveur ne s'ouvre jamais sans
+l'authentification configurée. Seul un fichier absent est toléré, et le
+serveur utilise alors ses valeurs par défaut.
+
+Les clés d'API ne sont **pas** des données du datastore : le module
+`yang/sysrepo-mcp.yang` a été supprimé et aucun module n'est installé dans
+sysrepo par le serveur. Le magasin de sessions est alloué dynamiquement à
+partir de la valeur de configuration.
 
 ## Structure
 
 ```
 sysrepo-mcp/
 ├── extern/                  # Dépendances téléchargées (hors Git, immuables)
-├── src/main.c               # Serveur FastCGI
+├── src/                     # Serveur FastCGI (main.c, transport.c, sessions.c,
+│                            #   libconfig.c, un module par domaine fonctionnel)
 ├── include/sysrepo/mcp/     # En-têtes publics (extraits par Doxygen)
-├── yang/sysrepo-mcp.yang    # Modèle YANG du serveur
 ├── tests/                   # Suite pytest
-├── docker/                  # Dockerfile, Makefile, lighttpd.conf
+├── docker/                  # Dockerfile, Makefile, config libconfig par défaut
 ├── scripts/                 # build-docker.sh, test.sh
 ├── sphinx/                  # Documentation RST + Doxyfile
 ├── config.in                # Options Kconfig
