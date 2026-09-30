@@ -132,9 +132,16 @@ P1 — Interoperability and deployment verification
    server now includes both fields (``ttlMs: 0``, ``cacheScope: "private"``)
    in modern ``tools/list`` and ``server/discover`` responses; the full Docker
    suite passes (259 passed, 0 failed). Restart/redeploy the updated responder
-   and confirm the connector can fetch and invoke a read-only tool. This
-   session currently cannot call the connection's tools, so live acceptance
-   remains unverified.
+   and confirm the connector can fetch and invoke a read-only tool. Live check
+   (2026-10-01): the connector lists the tools and read-only calls succeed
+   (``get_status``, ``sr_list_modules``, ``get_schema`` with ``xpath``,
+   ``sr_get_config``, ``sr_get_operational``, ``sr_diff_config``, and the
+   ``sr_notif_subscribe`` / ``sr_notif_poll`` / ``sr_notif_unsubscribe``
+   cycle on the ``oven`` module). Writes also work when ``config`` is sent:
+   ``sr_edit_config`` (merge into ``candidate``), ``sr_copy_config``
+   (``candidate`` to ``running``), ``sr_delete_config`` and the readback with
+   ``sr_get_config`` were verified on ``oven``. The ``insert-food`` RPC could
+   not be confirmed: see items 4 and 6.
 
 3. **Correct the authentication error code.** *Implemented* (see *Done*): a
    missing or invalid API key returns HTTP 401 with JSON-RPC ``-32003``
@@ -144,6 +151,60 @@ P1 — Interoperability and deployment verification
    (no credential, invalid credential) and stateless (no credential, invalid
    credential, valid credential still served). The stateless tests have not
    been run yet; run the Docker suite.
+
+4. **Surface tool errors to clients.** Through the live connector, failing
+   calls (``sr_edit_config``, ``sr_execute_rpc``, ``get_schema`` on
+   ``/oven:no-such-node``) all came back as the generic "The connector
+   returned an error or an invalid response.", with no text from the server.
+   The server log shows that it received the ``sr_edit_config`` call and
+   answered HTTP 200 with a short body, so the error text exists server-side
+   (for that call, most likely the ``config is required`` parameter error of
+   item 5) and does not reach the agent. The *Not found* message listing
+   module root paths (item 1) is likely hidden the same way; an out-of-range
+   ``temperature`` (300, range ``0..250``) sent with a valid ``config`` gets
+   the same generic message. Check how
+   tool-level failures are returned (JSON-RPC ``error`` versus a ``tools/call`` result with
+   ``isError: true`` and a text ``content`` block), prefer the latter if the
+   connector only shows the latter, and add a test asserting that the error
+   text is present in the response body.
+
+5. **Fix the ``sr_edit_config`` input schema in the tool catalogue.** The
+   entry in ``src/main.c`` declares ``xpath``, ``datastore`` and ``strict``
+   with ``required: ["xpath"]``, which is the ``sr_delete_config`` schema.
+   ``tool_sr_edit_config()`` in ``src/config_tools.c`` reads ``config`` (a
+   required object), ``operation`` (``merge``, ``replace`` or ``none``,
+   default ``merge``) and ``datastore``, and never reads ``xpath`` or
+   ``strict``. A client that follows ``tools/list`` therefore cannot write.
+   By the code, the live call on ``/oven:oven/temperature`` in ``candidate``
+   is refused with ``config is required and must be an object``; the
+   datastore was indeed left unchanged (empty ``sr_diff_config``
+   afterwards). The test suite passes because it sends ``config`` without
+   consulting the advertised schema. Declare ``config`` (required) and
+   ``operation`` in the catalogue, drop ``xpath`` and ``strict``, and add a
+   test asserting that every argument a handler reads is declared in its
+   ``inputSchema``, for all tools (only ``sr_edit_config`` has been compared
+   so far).
+
+   Status (2026-10-01): the catalogue entry is corrected in ``src/main.c``
+   (``config`` required, ``operation``, ``datastore``); it is not yet
+   rebuilt, redeployed or covered by the test above. Live, the handler
+   already worked with the stale schema when ``config`` was sent anyway (the
+   connector passes undeclared arguments): merge into ``candidate``,
+   promotion to ``running`` and readback verified on ``oven``.
+
+6. **Run the oven plugin in the live deployment.** ``sr_get_operational`` on
+   ``/oven:oven-state`` returned an empty result and ``sr_execute_rpc`` on
+   ``/oven:insert-food`` failed. Both are consistent with the plugin not
+   running next to the live sysrepo instance; this is not confirmed. The state
+   stayed empty with the oven switched on in ``running`` (``turned-on: true``,
+   ``temperature: 200``). The RPC
+   tools cannot be accepted live without it. Once item 4 lands, the failure
+   reason will be readable.
+
+7. **Stamp the version.** ``get_status`` reports ``0.0.0-unknown`` in the live
+   deployment. Pass the version at build time (for example from
+   ``git describe``) so the status output identifies the running build, which
+   also makes the redeploy check in item 2 verifiable.
 
 P2 — Protocol and agent capabilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -234,6 +295,33 @@ Points positifs
 
 - **Intégration YANG native.** ``sysrepo-mcp`` est linké contre libyang et
   sysrepo. Les modifications du schéma se répercutent directement dans ``get_schema``.
+
+Points à améliorer
+~~~~~~~~~~~~~~~~~~
+
+Constats du test en conditions réelles sur le module ``oven`` (2026-10-01),
+suivis dans *P1* du *Priority backlog* :
+
+- **Erreurs opaques.** Un appel en échec revient côté agent sous la forme
+  d'un message générique du connecteur, sans le texte d'erreur du serveur.
+  L'agent ne peut pas corriger sa requête (P1.4).
+
+- **Écriture non exprimable.** Le catalogue décrit ``sr_edit_config`` avec
+  les arguments de ``sr_delete_config`` (``xpath``, ``strict``) alors que le
+  handler lit ``config`` et ``operation`` : un client qui suit ``tools/list``
+  ne peut pas écrire selon le schéma annoncé, alors que le handler
+  fonctionne dès que ``config`` est envoyé (P1.5).
+
+- **Plugin oven non confirmé.** L'état opérationnel est vide et le RPC
+  ``insert-food`` échoue, sans qu'on puisse dire pourquoi (P1.6).
+
+- **Version inconnue.** ``get_status`` renvoie ``0.0.0-unknown`` (P1.7).
+
+- **Lectures, écritures et notifications validées.** ``get_schema``,
+  ``sr_get_config``, ``sr_get_operational``, ``sr_diff_config``,
+  ``sr_edit_config`` (avec ``config``), ``sr_copy_config``,
+  ``sr_delete_config`` et le cycle subscribe/poll/unsubscribe fonctionnent
+  via le connecteur.
 
 Build system
 ------------
