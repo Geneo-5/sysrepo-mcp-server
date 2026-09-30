@@ -56,6 +56,8 @@ Done
   returning early on a byte or a match, folds length mismatch into the
   accumulated result so a shorter key never matches a longer one by prefix,
   and ``mcp_config_load()`` rejects any configured key beyond the maximum.
+- Authentication failures reported with ``-32003`` (Denied) and HTTP 401 on
+  both the legacy and the stateless request paths, instead of ``-32603``.
 - Source file split: ``main.c`` (FastCGI entry point, tool catalogue),
   ``config.c`` (``mcp_config_set()``/``mcp_config_get()``, sysrepo_open/close),
   ``libconfig.c`` (libconfig file parser into ``struct mcp_config``),
@@ -127,11 +129,14 @@ P1 — Interoperability and deployment verification
    session currently cannot call the connection's tools, so live acceptance
    remains unverified.
 
-3. **Correct the authentication error code.** A missing or invalid API key
-   returns HTTP 401 with JSON-RPC ``-32603`` (Internal error). Choose the
-   documented authentication/authorization code, update both initialization
-   and stateless request paths, and align tests and :doc:`api`. Do not leave a
-   client authentication failure classified as an internal server fault.
+3. **Correct the authentication error code.** *Implemented* (see *Done*): a
+   missing or invalid API key returns HTTP 401 with JSON-RPC ``-32003``
+   (``MCP_ERR_DENIED``) on the legacy initialization path and on the stateless
+   request path, never ``-32603`` (Internal error). :doc:`api` documents the
+   choice. Tested through the HTTP layer in ``tests/test_auth.py``: legacy
+   (no credential, invalid credential) and stateless (no credential, invalid
+   credential, valid credential still served). The stateless tests have not
+   been run yet; run the Docker suite.
 
 P2 — Protocol and agent capabilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

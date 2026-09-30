@@ -369,7 +369,7 @@ class McpClient:
         if lines:
             print(f"\n--- {label} ---\n{lines.decode(errors='replace')}", end="")
 
-    # -- convenience ----------------------------------------------------</parameter>
+    # -- convenience ----------------------------------------------------
 
     def get_config(self, xpath: str, **kwargs: Any) -> dict:
         return self.tool("sr_get_config", {"xpath": xpath, **kwargs})

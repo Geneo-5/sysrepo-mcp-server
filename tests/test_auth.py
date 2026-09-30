@@ -41,6 +41,8 @@ from .conftest import MCP_LEGACY_PROTOCOL_VERSION, McpClient, FailClosedResult
 # JSON-RPC error codes (the JSON-RPC 2.0 specification)
 # -----------------------------------------------------------------------
 
+MCP_PROTOCOL_VERSION = "2026-07-28"  # stateless (modern) protocol revision
+
 MCP_ERR_DENIED       = -32003  # unauthorized / access denied
 MCP_ERR_NO_SESSION   = -32008  # session expired
 MCP_ERR_INTERNAL     = -32603  # server error
@@ -137,6 +139,82 @@ def test_tool_call_without_auth(mcp_auth: McpClient) -> None:
     payload = response.json()
 
     assert payload["error"]["code"] == MCP_ERR_DENIED
+
+
+def _modern_ping(mcp_auth: McpClient, token: str | None):
+    """
+    Send a stateless ``2026-07-28`` ``ping``, optionally with a Bearer token.
+
+    The modern request format is recognised by its ``MCP-Protocol-Version`` /
+    ``Mcp-Method`` headers and takes a different path in ``serve()`` from the
+    legacy handshake, so it needs its own authentication coverage.
+    """
+    body = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "ping",
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": MCP_PROTOCOL_VERSION,
+                "io.modelcontextprotocol/clientInfo": {
+                    "name": "sysrepo-mcp-tests",
+                    "version": "1.0.0",
+                },
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    }).encode("utf-8")
+
+    headers = {
+        "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+        "Mcp-Method": "ping",
+    }
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+
+    return mcp_auth.request(body=body, extra_headers=headers)
+
+
+def test_modern_no_credential(mcp_auth: McpClient) -> None:
+    """
+    A stateless request without credential -> 401 with ``-32003``, not the
+    internal-error code ``-32603`` (``sphinx/todo.rst`` P1.3).
+    """
+    response = _modern_ping(mcp_auth, None)
+
+    assert response.status == 401
+
+    payload = response.json()
+
+    assert payload["error"]["code"] == MCP_ERR_DENIED
+    assert "Unauthorized" in payload["error"]["message"]
+
+
+def test_modern_invalid_credential(mcp_auth: McpClient) -> None:
+    """
+    A stateless request with an unknown key -> 401 with ``-32003``.
+    """
+    response = _modern_ping(mcp_auth, "this-key-does-not-exist")
+
+    assert response.status == 401
+
+    payload = response.json()
+
+    assert payload["error"]["code"] == MCP_ERR_DENIED
+
+
+def test_modern_valid_credential(mcp_auth: McpClient) -> None:
+    """
+    A stateless request with a valid key is served: the denial code is only
+    for authentication failures.
+    """
+    response = _modern_ping(mcp_auth, "test-admin-key-0001")
+
+    assert response.status == 200
+
+    payload = response.json()
+
+    assert "result" in payload
 
 
 def test_module_install_denied(mcp_auth: McpClient) -> None:
