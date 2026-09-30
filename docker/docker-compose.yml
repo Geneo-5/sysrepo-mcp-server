@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: LGPL-3.0-only
+#
+# This file is part of sysrepo-mcp.
+# Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
+#
+# Docker Compose configuration for sysrepo-mcp server.
+# Equivalent to docker/run.sh but managed as a service.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml up -d
+#   docker compose -f docker/docker-compose.yml down
+#   docker compose -f docker/docker-compose.yml restart
+#
+# Or via build-docker.sh:
+#   scripts/build-docker.sh --srv=start
+#   scripts/build-docker.sh --srv=stop
+#   scripts/build-docker.sh --srv=reload
+
+services:
+  sysrepo-mcp:
+    image: ${DOCKER_IMAGE:-sysrepo-mcp}:${DOCKER_TAG:-latest}
+    container_name: sysrepo-mcp-server
+    
+    # Match docker run -it behavior
+    stdin_open: true
+    tty: true
+    
+    # Restart policy for service management
+    restart: unless-stopped
+    
+    # Publish HTTP and HTTPS ports (matches run.sh)
+    ports:
+      - "80:80"
+      - "443:443"
+    
+    # Mount project directory (matches run.sh)
+    volumes:
+      - ${PROJECT_DIR:-..}:${PROJECT_DIR:-..}
+    
+    # Working directory (matches run.sh)
+    working_dir: ${PROJECT_DIR:-..}
+    
+    # Command to execute (matches run.sh)
+    command: ["docker/run.sh"]
+    
+    # Environment variables
+    environment:
+      - PROJECT_DIR=${PROJECT_DIR:-..}
+    
+    # Health check (optional, adjust endpoint as needed)
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:80/mcp"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 10s

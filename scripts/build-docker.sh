@@ -40,7 +40,13 @@ usage() {
     echo "  --force      Force rebuild (image + sources)"
     echo "  --test       Run smoke tests after build"
     echo "  --test=ARGS  Run smoke tests after build with ARG"
-    echo "  --run        Run after build"
+    echo "  --run        Run after build (deprecated, use --srv=start)"
+    echo "  --srv        Manage service via docker-compose (default: reload)"
+    echo "               --srv=start    Start the service"
+    echo "               --srv=stop     Stop the service"
+    echo "               --srv=reload   Reload/restart the service (default)"
+    echo "               --srv=status   Show service status"
+    echo "               --srv=logs     Show service logs"
     echo "  --help       Show this help"
     echo ""
     echo "Examples:"
@@ -48,7 +54,10 @@ usage() {
     echo "  $(basename "$0") --doc        # Build binary + all docs"
     echo "  $(basename "$0") --doc-html   # Build binary + HTML docs"
     echo "  $(basename "$0") --test       # Build + smoke test"
-    echo "  $(basename "$0") --run        # Build + run"
+    echo "  $(basename "$0") --run        # Build + run (deprecated)"
+    echo "  $(basename "$0") --srv        # Build + reload service"
+    echo "  $(basename "$0") --srv=start  # Build + start service"
+    echo "  $(basename "$0") --srv=stop   # Build + stop service"
 }
 
 # Parse arguments
@@ -59,6 +68,7 @@ FORCE=0
 TEST=0
 TEST_ARGS=""
 RUN=0
+SRV=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -92,6 +102,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --run)
             RUN=1
+            shift
+            ;;
+        --srv)
+            SRV="reload"
+            shift
+            ;;
+        --srv=*)
+            SRV="${1#*=}"
             shift
             ;;
         --test)
@@ -217,8 +235,9 @@ if [ "$TEST" -eq 1 ]; then
         make test PYTEST_ARGS="${TEST_ARGS}"
 fi
 
-# Step 6: Run (if requested)
+# Step 6: Run (if requested, deprecated)
 if [ "$RUN" -eq 1 ]; then
+    log_warn "Option --run is deprecated. Use --srv=start instead."
     log_info "Running service..."
     docker run --rm -it \
         -p 80:80 \
@@ -227,6 +246,48 @@ if [ "$RUN" -eq 1 ]; then
         -w "${PROJECT_DIR}" \
         "${DOCKER_IMAGE}:${DOCKER_TAG}" \
         docker/run.sh
+fi
+
+# Step 7: Service management (if --srv requested)
+if [ -n "$SRV" ]; then
+    COMPOSE_FILE="${PROJECT_DIR}/docker/docker-compose.yml"
+    
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        log_error "docker-compose.yml not found: $COMPOSE_FILE"
+        exit 1
+    fi
+    
+    export PROJECT_DIR
+    export DOCKER_IMAGE
+    export DOCKER_TAG
+    
+    case "$SRV" in
+        start)
+            log_info "Starting service via docker-compose..."
+            docker compose -f "$COMPOSE_FILE" up -d
+            ;;
+        stop)
+            log_info "Stopping service via docker-compose..."
+            docker compose -f "$COMPOSE_FILE" down
+            ;;
+        reload|restart)
+            log_info "Reloading service via docker-compose..."
+            docker compose -f "$COMPOSE_FILE" up -d --force-recreate
+            ;;
+        status)
+            log_info "Service status:"
+            docker compose -f "$COMPOSE_FILE" ps
+            ;;
+        logs)
+            log_info "Service logs:"
+            docker compose -f "$COMPOSE_FILE" logs -f
+            ;;
+        *)
+            log_error "Unknown --srv action: $SRV"
+            log_error "Valid actions: start, stop, reload, status, logs"
+            exit 1
+            ;;
+    esac
 fi
 
 log_info "Done."
