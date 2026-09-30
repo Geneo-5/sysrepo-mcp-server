@@ -9,8 +9,9 @@ This chapter describes how to build and install sysrepo-mcp.
 
    The build system and the container environment are functional. The server
    itself dispatches MCP tools over a fully implemented lifecycle, with
-   authentication (API keys) and access control (NACM, module filter, write
-   protection).  See the :doc:`todo` appendix for remaining work.
+   authentication (API keys) and access control (NACM, plus an outright block
+   on module installation when authentication is on).  See the :doc:`todo`
+   appendix for remaining work.
 
 Prerequisites
 -------------
@@ -147,7 +148,10 @@ Configuration
 -------------
 
 Kconfig contains only build-time choices. The runtime settings live in the
-libconfig file, ``/etc/sysrepo-mcp/sysrepo-mcp.conf`` by default.
+libconfig file, ``/etc/sysrepo-mcp/sysrepo-mcp.conf`` by default
+(``docker/sysrepo-mcp.conf`` is the example shipped with the project). A file
+that exists but fails to parse or to validate stops the server at startup;
+only an absent file falls back to the built-in defaults.
 
 Build-time options
 ~~~~~~~~~~~~~~~~~~
@@ -165,9 +169,13 @@ Build-time options
    * - ``SYSREPO_MCP_SERVER_SESSION_ID_LEN``
      - ``32``
      - Session identifier length in hexadecimal characters.
+   * - ``SYSREPO_MCP_SERVER_MAX_API_KEY_LEN``
+     - ``256``
+     - Maximum length in bytes of a configured API key (16-4096). Longer
+       keys are rejected at load time.
 
 Session and schema settings
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
    :header-rows: 1
@@ -214,7 +222,7 @@ terminate TLS there. Example standalone config and systemd unit:
 ``contrib/systemd/sysrepo-mcp-standalone.service``.
 
 Authentication
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 
 The ``server.auth`` group accepts ``method`` (``none``, ``bearer`` or
 ``cookie``; default ``none``), ``cookie_name`` (default ``mcp_session``), and
@@ -266,10 +274,13 @@ Usage
 
 .. code-block:: bash
 
-   sysrepo-mcp [--help] [--version] [-f <file>] [-l <severity>]
+   sysrepo-mcp [-f <file> | --config <file>] [-l <severity> | --log-level <severity>]
+               [--help] [--version]
 
-``--help`` prints a usage summary and exits, ``--version`` prints the version
-and exits. ``--log-level`` accepts elog severities ``emerg``, ``alert``,
+``-f`` / ``--config`` selects the libconfig file (default
+``/etc/sysrepo-mcp/sysrepo-mcp.conf``). ``--help`` prints a usage summary and
+exits, ``--version`` prints the version and exits. ``--log-level`` accepts
+elog severities ``emerg``, ``alert``,
 ``crit``, ``err``, ``warn``, ``notice``, ``info`` or ``debug`` and overrides
 the libconfig threshold. With the default ``proxy`` listener mode the process
 expects to be started as a FastCGI application by a web server. Select

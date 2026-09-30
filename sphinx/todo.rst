@@ -210,7 +210,7 @@ Points positifs
   nœud le retrouve toujours, dans n'importe quel datastore.
 
 - **Multi-datastore.** ``running``, ``startup`` et ``candidate`` sont
-  accessibles directement. Un agent peut lire, valider et valider avant
+  accessibles directement. Un agent peut lire, modifier et valider avant
   d'appliquer.
 
 - **Notifications complètes.** Cycle complet géré par le serveur :
@@ -258,7 +258,8 @@ build used to get wrong.
 Source layout
 -------------
 
-``main.c`` was split into 10 source files + 10 headers.
+The code is split into one source file per functional area, each with its own
+header.
 
 ``src/main.c``
    FastCGI entry point (``FCGX_Accept_r`` loop, signal handling,
@@ -312,6 +313,14 @@ Source layout
 ``src/status.c``
    ``get_status``.
 
+``src/diff.c``
+   ``sr_diff_config``: reads both datastores, diffs them with
+   ``lyd_diff_siblings()`` and serialises the result with ``diff_to_json()``.
+
+``src/log.c``
+   ``mcp_log_*`` helpers on top of ``elog`` (syslog, file and console back
+   ends), configured from the libconfig file.
+
 Headers live under ``include/sysrepo/mcp/`` — one per source file, forward
 declarations only. Every module includes ``utilities.h`` for shared helpers.
 
@@ -322,7 +331,8 @@ The suite in ``tests/`` drives the server the way a client does: HTTP to
 lighttpd on port 80, forwarded over FastCGI, against the upstream oven plugin
 from ``extern/sysrepo/examples/plugin/oven.c``. It runs in a private sysrepo
 repository and shared-memory namespace, so it never touches the system
-repository. Remaining test work is tracked in *P4 — Tests to complete* above.
+repository. Remaining test work is tracked under *P3 — Verification and
+release quality* above.
 
 Layout:
 
@@ -355,6 +365,20 @@ Layout:
    Argument validation, the ``SR_ERR_*`` mapping, module listing, and the
    project's own YANG module, which supplies the list, key predicate and
    empty-match cases that the oven model has none of.
+
+``tests/test_auth.py``
+   Authentication and NACM through a dedicated server with API keys: legacy
+   and stateless credential checks, the ``-32003`` denial code, blocked
+   module installation, NACM-denied RPCs, constant-time key lookup and
+   fail-closed startup on an invalid configuration.
+
+``tests/test_diff.py``
+   ``sr_diff_config``: no-op, created, deleted, replaced and default-value
+   cases.
+
+``tests/test_standalone.py``
+   The standalone FastCGI listeners (Unix socket and TCP), driven without a
+   web-server supervisor.
 
 Not planned
 -----------
@@ -393,8 +417,8 @@ Decisions already taken, recorded here so they are not re-litigated:
 **A dedicated dry-run tool**
    sysrepo itself has no dry-run operation to wrap. Writing to ``candidate``,
    validating it, and comparing it against ``running`` already gets an agent
-   most of the way there — see ``sr_diff_config`` in :doc:`api` (P2) once it
-   exists. ``sr_copy_config`` can promote a validated ``candidate``. A
+   most of the way there — see ``sr_diff_config`` in :doc:`api`.
+   ``sr_copy_config`` can promote a validated ``candidate``. A
    separate dry-run tool would only be
    reconsidered if that combination proves insufficient in practice.
 

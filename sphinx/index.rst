@@ -14,12 +14,12 @@ a reverse proxy.
 
 .. warning::
 
-   **Work in progress.** The build system, the Docker environment and the
-   documentation describe the target design. The server itself is a partial
-   skeleton: several tools are stubbed and the MCP lifecycle
-   (``initialize`` / ``tools/list``) is not implemented yet. Every section
-   below states explicitly what is implemented and what is planned; the
-   :doc:`todo` appendix tracks the remaining work.
+   **Early release.** Every tool, the MCP lifecycle for both protocol eras,
+   sessions, API-key authentication and NACM enforcement are implemented.
+   What remains (live-connector verification, protocol extensions,
+   release-quality checks) is tracked in the :doc:`todo` appendix, which is the
+   single source of truth for the state of the project. Access control
+   depends on the deployment configuration: see :doc:`architecture`.
 
 For license information, see the :ref:`license` appendix.
 

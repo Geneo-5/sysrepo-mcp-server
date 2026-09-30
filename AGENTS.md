@@ -184,8 +184,9 @@ Deux niveaux, à ne pas confondre :
 - **`config.in`** (Kconfig) : uniquement les options figées à la compilation.
   Nom et version du paquet, chemin du dépôt sysrepo, longueur des identifiants
   de session et longueur maximale d'une clé d'API.
-- **Fichier libconfig** (`docker/sysrepo-mcp.conf` par défaut, `--config
-  <fichier>` pour en choisir un autre) : tout le reste à l'exécution, à savoir
+- **Fichier libconfig** (`/etc/sysrepo-mcp/sysrepo-mcp.conf` par défaut,
+  `--config <fichier>` pour en choisir un autre ; `docker/sysrepo-mcp.conf`
+  en est l'exemple fourni) : tout le reste à l'exécution, à savoir
   transport, authentification et clés d'API (`auth.api_keys[]`), limites de
   session, journalisation. Il est lu une seule fois au démarrage par
   `src/libconfig.c`.
@@ -209,7 +210,7 @@ sysrepo-mcp/
 │                            #   libconfig.c, un module par domaine fonctionnel)
 ├── include/sysrepo/mcp/     # En-têtes publics (extraits par Doxygen)
 ├── tests/                   # Suite pytest
-├── docker/                  # Dockerfile, Makefile, config libconfig par défaut
+├── docker/                  # Dockerfile, Makefile, config libconfig d'exemple
 ├── scripts/                 # build-docker.sh, test.sh
 ├── sphinx/                  # Documentation RST + Doxyfile
 ├── config.in                # Options Kconfig

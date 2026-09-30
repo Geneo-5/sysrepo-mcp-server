@@ -197,10 +197,10 @@ what tells a client to re-initialize rather than retry. A session is lost
 when:
 
 - the client deleted it;
-- it was idle longer than ``SYSREPO_MCP_SERVER_SESSION_TTL``;
+- it was idle longer than ``server.session.ttl``;
 - the server restarted.
 
-Past ``SYSREPO_MCP_SERVER_MAX_SESSIONS`` concurrent sessions, ``initialize``
+Past ``server.session.max_sessions`` concurrent sessions, ``initialize``
 is refused with HTTP 503 and a ``-32000`` error.
 
 .. warning::
@@ -208,8 +208,8 @@ is refused with HTTP 503 and a ``-32000`` error.
    Sessions live in the FastCGI process that created them. The deployment
    **must** use ``max-procs = 1``: with more, consecutive requests from one
    agent land in different processes and the session is not found. This is the
-   main open limitation of the current implementation; see :doc:`todo`,
-   milestone 4.
+   intended deployment rather than a limitation to be lifted; see *Not planned*
+   in :doc:`todo`.
 
 ``tools/list``
 ^^^^^^^^^^^^^^
@@ -295,7 +295,7 @@ Examples
    The examples below mostly use ``oven``, the example module shipped with
    sysrepo in ``extern/sysrepo/examples/plugin/oven.yang``. This project no
    longer installs a YANG module of its own — API keys and other runtime
-   settings live in a libconfig file instead (see :doc:`todo`, P1).
+   settings live in a libconfig file instead (see :doc:`architecture`).
 
 Tool catalogue
 --------------
@@ -411,7 +411,7 @@ sr_get_config
    API keys are **not** datastore data. They live in the server's own
    libconfig file (``auth.api_keys[]``), read once at startup — the
    ``yang/sysrepo-mcp.yang`` module that used to expose
-   ``/sysrepo-mcp:api-key`` was removed (see :doc:`todo`, P1). There is
+   ``/sysrepo-mcp:api-key`` was removed (see :doc:`architecture`). There is
    nothing to read or write about API keys through ``sr_get_config`` or
    ``sr_edit_config``.
 
@@ -795,38 +795,8 @@ The oven state:
        }
    }
 
-The server's own state:
-
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 31,
-       "method": "tools/call",
-       "params": {
-           "name": "sr_get_operational",
-           "arguments": {
-               "xpath": "/sysrepo-mcp:server-state"
-           }
-       }
-   }
-
-.. code-block:: json
-
-   {
-       "jsonrpc": "2.0",
-       "id": 31,
-       "result": {
-           "data": {
-               "sysrepo-mcp:server-state": {
-                   "version": "0.1.0",
-                   "uptime-seconds": 3600,
-                   "active-sessions": 0,
-                   "max-sessions": 64
-               }
-           }
-       }
-   }
+The server's own health and session counters are not YANG data: use
+``get_status``.
 
 .. note::
 
@@ -967,7 +937,7 @@ The flow an agent follows:
 .. warning::
 
    Events are queued, not pushed, and the queue is bounded by
-   ``SYSREPO_MCP_SERVER_NOTIF_QUEUE_SIZE``. When it overflows the oldest
+   ``server.session.notif_queue_size``. When it overflows the oldest
    entries are dropped and ``sr_notif_poll`` reports how many. An agent that
    must not miss an event has to poll often enough, or narrow its filter.
 
@@ -1328,10 +1298,10 @@ Each entry of ``sessions`` carries ``session_id``, ``created``,
 
 .. note::
 
-   ``get_status`` reports server health only. The same information, plus the
-   session list, is available as YANG data under
-   ``/sysrepo-mcp:server-state`` through ``sr_get_operational``; this tool
-   exists so that a liveness probe does not need the datastore to be readable.
+   ``get_status`` reports server health and session counters. It is served
+   from the server's own memory and opens no sysrepo session, so a liveness
+   probe does not need the datastore to be readable. There is no YANG view of
+   this data: the project installs no module of its own.
 
 get_schema
 ~~~~~~~~~~
@@ -1484,6 +1454,16 @@ The implementation-defined range, ``-32000`` to ``-32099``, as defined in
      - Session required
      - The tool keeps state between requests. Call ``initialize`` and send
        the ``Mcp-Session-Id`` header it returns.
+   * - ``-32020``
+     - Invalid request metadata
+     - Stateless (``2026-07-28``) request with missing or malformed ``_meta``
+       fields, or ``MCP-Protocol-Version`` / ``Mcp-Method`` / ``Mcp-Name``
+       headers that do not match the body. HTTP 400.
+   * - ``-32022``
+     - Unsupported protocol version
+     - Stateless request naming a version other than ``2026-07-28``, or an
+       ``initialize`` sent on the stateless path. HTTP 400; ``data.supported``
+       lists the accepted versions.
 
 .. warning::
 
@@ -1495,7 +1475,8 @@ The implementation-defined range, ``-32000`` to ``-32099``, as defined in
 
 .. note::
 
-   Codes ``-32000`` to ``-32006`` and ``-32008`` are specific to this server.
+   Codes ``-32000`` to ``-32006``, ``-32008``, ``-32020`` and ``-32022`` are
+   specific to this server.
    Earlier drafts mapped every sysrepo failure to ``-32603``, which loses the
    distinction between "your request is wrong", worth retrying differently,
    and "the server is broken", not worth retrying at all. That distinction
@@ -1583,10 +1564,19 @@ Non-200 statuses are reserved for failures of the transport layer itself.
    * - ``204``
      - A session was terminated by ``DELETE``. Empty body.
    * - ``400``
-     - Malformed HTTP request, or a missing or empty body.
+     - Malformed HTTP request, a missing or empty body, or malformed metadata
+       on a stateless request (``-32020``, ``-32022``).
+   * - ``401``
+     - Authentication is configured and the API key is missing or unknown
+       (JSON-RPC ``-32003``).
+   * - ``403``
+     - The request carries an ``Origin`` header, or the tool is blocked
+       outright while authentication is on (``sr_module_install``,
+       ``sr_module_uninstall``). JSON-RPC ``-32003``.
    * - ``404``
      - Unknown or expired ``Mcp-Session-Id``, or ``DELETE`` without one. The
-       client re-initializes.
+       client re-initializes. The stateless path also answers an unknown
+       method with 404 (``-32601``).
    * - ``405``
      - A method other than POST or DELETE. Carries ``Allow: POST, DELETE``.
    * - ``413``

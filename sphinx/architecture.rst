@@ -158,9 +158,9 @@ events waiting to be collected.
   answered with HTTP 404, which tells the client to re-initialize.
 - ``DELETE`` on the endpoint terminates a session and releases its
   subscriptions.
-- A session idle longer than ``SYSREPO_MCP_SERVER_SESSION_TTL`` is dropped,
-  and past ``SYSREPO_MCP_SERVER_MAX_SESSIONS`` concurrent sessions
-  ``initialize`` is refused with HTTP 503.
+- A session idle longer than ``server.session.ttl`` is dropped, and past
+  ``server.session.max_sessions`` concurrent sessions ``initialize`` is
+  refused with HTTP 503.
 
 The header is optional. A request without one is served normally, so an agent
 reading a value once does not have to handshake first; only the notification
@@ -173,13 +173,11 @@ tools need a session, and they say so with the ``-32008`` error.
    requests from one agent land in different ones and the session is not
    found.
 
-   This is the main open limitation. The fix is to move the session store out
-   of the process, most likely under
-   ``/sysrepo-mcp:server-state/session`` in the operational datastore, which
-   would give sharing and expiry at once. The subscriptions themselves are
-   harder: a sysrepo subscription belongs to the process that created it, so
-   sharing sessions across workers means one worker receiving events on behalf
-   of the others. See :doc:`todo`, milestone 4.
+   This is the intended deployment, not a throughput ceiling to be lifted:
+   the server configures one complex system, and several agents writing to
+   the same datastore at once would risk interleaved, conflicting changes.
+   A shared session store and horizontal scaling are therefore not planned;
+   see *Not planned* in :doc:`todo`.
 
 Notifications
 ~~~~~~~~~~~~~
@@ -217,22 +215,24 @@ Configuration is split in two:
    limits (maximum concurrent sessions, idle TTL, notification queue size)
    moved to runtime — see below. See :doc:`install`.
 
-**Runtime**, in the libconfig file (``docker/sysrepo-mcp.conf`` by default)
-   The API key list, session limits, transport and logging settings. Parsed
-   once at startup by ``src/libconfig.c``; there is no YANG module of this
-   project's own installed into sysrepo, and nothing here is subject to
-   NACM (NACM governs the datastore, not this file).
+**Runtime**, in the libconfig file (``/etc/sysrepo-mcp/sysrepo-mcp.conf`` by default)
+   The API key list, session limits, transport and logging settings.
+   ``docker/sysrepo-mcp.conf`` is the example shipped with the project.
+   Parsed once at startup by ``src/libconfig.c``. A file that exists but
+   fails to parse or to validate stops the server before it opens sysrepo or
+   binds a listener; only an absent file falls back to the built-in
+   defaults. There is no YANG module of this project's own installed into
+   sysrepo, and nothing here is subject to NACM (NACM governs the datastore,
+   not this file).
 
 .. note::
 
    Session limits are already a runtime libconfig setting
    (``server.session.max_sessions``/``ttl``/``notif_queue_size``), and the
    session table itself is allocated dynamically at startup from that value
-   (``sessions_init()``) rather than sized at compile time. What is still
-   fixed by ``max-procs = 1`` is *where* sessions live — one FastCGI
-   process — not how many of them are allowed. Moving the session store
-   itself out of the process and into the datastore, which milestone 4
-   calls for, is what would let sessions survive more than one process.
+   (``sessions_init()``) rather than sized at compile time. What is fixed by
+   ``max-procs = 1`` is *where* sessions live — one FastCGI process — not
+   how many of them are allowed.
 
 Authentication
 --------------
@@ -258,25 +258,26 @@ the proxy forwards it as the ``HTTP_AUTHORIZATION`` FastCGI parameter.
 3. It resolves the associated NACM user name.
 4. It calls ``sr_nacm_set_user()`` on the sysrepo session, so every subsequent
    operation is evaluated against that user's NACM rules.
-5. A missing or unknown key yields HTTP 401.
+5. A missing or unknown key yields HTTP 401 with JSON-RPC error ``-32003``.
 
 .. warning::
 
    API keys are held in cleartext, both in the libconfig file on disk and in
    the server's memory (``struct mcp_api_key.key`` in
    ``include/sysrepo/mcp/libconfig.h``) — anyone who can read that file or
-   attach to the process can read every key. The current comparison in
-   ``mcp_config_find_key()`` scans to the longer key length, so timing still
-   varies with key length. A fixed-length constant-time check is open under
-   P0 in ``sphinx/todo.rst``. Use high-entropy keys and restrict access to
-   the config file; do not expose this deployment to an untrusted agent
-   until the P0 items are complete.
+   attach to the process can read every key. The lookup in
+   ``mcp_config_find_key()`` is constant-time: it scans every configured key
+   over a fixed width (``CONFIG_SYSREPO_MCP_SERVER_MAX_API_KEY_LEN``) without
+   returning early, and keys longer than that are rejected at load time.
+   Hashing the keys was rejected as unnecessary CPU cost, so use high-entropy
+   keys, restrict access to the config file, and never log credentials.
 
 Cookie
 ~~~~~~
 
 An alternative for browser-based clients: the key travels in a cookie named
-after ``SYSREPO_MCP_SERVER_COOKIE_NAME``, and is validated identically. Cookie
+after ``server.auth.cookie_name`` (with ``server.auth.method = "cookie"``),
+and is validated identically. Cookie
 credentials are exposed to CSRF; the bearer header is preferred everywhere
 else.
 
@@ -312,9 +313,10 @@ Access control flow::
         v  sysrepo evaluates every read/write/exec against ietf-netconf-acm
    JSON-RPC response, or NACM access-denied error
 
-The module allow-list and the write protection declared in ``config.in`` are a
-coarse second layer applied before sysrepo is called at all; they are not a
-replacement for NACM rules.
+One coarse layer sits in front of NACM: when authentication is on,
+``sr_module_install`` and ``sr_module_uninstall`` are refused outright (HTTP
+403, ``-32003``), because they change the schema for the whole sysrepo
+instance. It is not a replacement for NACM rules.
 
 .. warning::
 
@@ -432,6 +434,9 @@ The tool surface is specified in :doc:`api`. Summarised by area:
    * - ``sr_copy_config``
      - implemented
      - ``sr_copy_config()``
+   * - ``sr_diff_config``
+     - implemented
+     - ``sr_get_data()`` on both sides + ``lyd_diff_siblings()``
    * - ``sr_get_operational``
      - implemented
      - ``sr_session_switch_ds()`` + ``sr_get_data()``
@@ -494,7 +499,9 @@ Security
 3. Run the server as a dedicated unprivileged user, member of the sysrepo
    group, never as root, which is also the NACM recovery user.
 4. Turn access control on, and give each agent its own key and NACM user.
-5. Restrict the module allow-list to what the agent genuinely needs.
+5. Grant each agent only the NACM rules it needs: module installation is
+   already refused when authentication is on, but read, write and exec access
+   are governed by NACM alone.
 6. Rotate keys, and log every configuration change with the key identity that
    caused it.
 
@@ -502,9 +509,9 @@ Performance
 ~~~~~~~~~~~
 
 1. **Concurrency is capped at one process.** ``max-procs`` must stay at 1
-   while sessions are process-local, so requests are serialised. This is the
-   binding constraint on throughput today, and the reason milestone 4 matters
-   beyond correctness.
+   because sessions are process-local, so requests are serialised. This is
+   deliberate: one agent at a time configures the system (see *Not planned*
+   in :doc:`todo`).
 2. A sysrepo connection is expensive to open and cheap to reuse; one is kept
    per process for its lifetime.
 3. Reading a whole module is expensive. Prefer a precise XPath over fetching a
@@ -519,7 +526,7 @@ Observability
 ~~~~~~~~~~~~~
 
 1. ``get_status`` for a liveness probe.
-2. ``sr_get_operational`` on ``/sysrepo-mcp:server-state`` for detail.
+2. ``get_status`` with ``verbose`` set, to list the live sessions.
 3. The proxy access log for latency and status codes.
 4. syslog for the server and sysrepo library messages.
 
@@ -532,12 +539,14 @@ Deliberately not planned:
   rules out pushed notifications, MCP sampling and elicitation.
 - **WebSocket transport**: not an MCP binding, and redundant with FastCGI.
 - **A direct HTTP listener**: HTTP, TLS and rate limiting stay in the proxy.
+- **A shared session store and horizontal scaling**: the server configures
+  one complex system, so concurrent agents are not a goal.
+- **OAuth2 or JWT credentials**: the libconfig API-key list plus NACM is the
+  deliberately lighter mechanism.
 
 Possible later:
 
-- OAuth2 or JWT credentials, which the MCP authorization specification builds
-  on.
-- Horizontal scaling behind a load balancer, once sessions are shared.
+- Transactions spanning several tool calls, with explicit commit and rollback.
 - Metrics export.
 
 Summary
