@@ -115,10 +115,17 @@ P1 — Interoperability and deployment verification
    (up to 10, ``/<module>:<node>``) so the agent can pick one and drill in
    with ``max_depth: 1``; otherwise it points to ``get_schema`` without
    ``xpath`` to list the modules. Two tests cover both cases in
-   ``tests/test_schema.py``. Remaining: build and run the Docker suite (this
-   change and its tests have not been compiled or run yet), and confirm the
-   flow with an agent using only MCP tools. Known gap: for ``union`` leaves ``get_schema`` reports only
-   ``base_type: union``, not the member types.
+   ``tests/test_schema.py``. The Docker suite passes with the change.
+
+   Known gap filled: for ``union`` leaves ``get_schema`` now reports the
+   member types. ``add_union_member()`` iterates each member and emits its
+   ``type`` plus constraints (range, patterns, values, etc.), matching the
+   output contract for top-level leaves. The test fixture ``sysrepo-mcp-test.yang``
+   includes an inline union (``string || uint8``) and a typedef union that
+   are both covered by tests. Remaining union gaps: nested unions (union of
+   unions) are reported as ``type: union`` without expanding the inner members;
+   the test module doesn't exercise this case yet, and no real-world model
+   uses it.
 
 2. **Verify the live MCP connector after deployment.** The connector reported
    that ``tools/list`` rejected missing ``ttlMs`` and ``cacheScope``. The

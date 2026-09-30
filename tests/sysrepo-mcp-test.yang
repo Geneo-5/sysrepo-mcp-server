@@ -3,12 +3,10 @@
 /// This file is part of sysrepo-mcp.
 /// Copyright (C) 2026 Loic JOURDHEUIL SELLIN <46419549+Geneo-5@users.noreply.github.com>
 
-/// Minimal test module mirroring the server YANG model (sysrepo-mcp.yang).
-/// Used by tests that install a module into a private sysrepo repository
-/// without requiring the real production module.  The structure mirrors
-/// yang/sysrepo-mcp.rs exactly — namespace, lists, types — so that
-/// test_project_module_installs and every fixture that depends on
-/// the sysrepo-mcp module can run against a private repository.
+/// Test module that exercises every type covered by get_schema:
+/// uint8/16/32/64, int8/16/32/64, string (with range, length, patterns
+/// including invert-match), binary, boolean, enumeration, bits,
+/// empty, decimal64, identityref, leafref, union, and containers/lists.
 
 module sysrepo-mcp-test {
     yang-version 1.1;
@@ -24,9 +22,59 @@ module sysrepo-mcp-test {
 
     revision "2026-09-25" {
         description
-            "Test module mirroring the server YANG model for private
-             repository tests.";
+            "Test module covering all get_schema type cases.";
     }
+
+    /* --- types exercised by get_schema --- */
+
+    typedef mac-address {
+        type string {
+            length "12..17";
+            pattern "([0-9a-f]{2}:){5}[0-9a-f]{2}";
+        }
+        description "MAC address as a string with length + pattern.";
+    }
+
+    typedef mac-collapsed {
+        type string {
+            length "12..17";
+            pattern "([0-9a-f]{2}:){5}[0-9a-f]{2}" {
+                invert-match true;
+                description "reject non-MAC strings";
+            }
+        }
+        description "string with invert-match pattern.";
+    }
+
+    typedef my-binary {
+        type binary;
+        description "Plain binary type.";
+    }
+
+    typedef my-identity {
+        base identity-ref;
+        description "Test identity.";
+    }
+
+    identity my-derived {
+        base my-identity;
+        description "Identity derived from my-identity.";
+    }
+
+    typedef my-identityref {
+        type identityref {
+            base my-identity;
+        }
+        description "Identityref with explicit base.";
+    }
+
+    union string-or-int {
+        type string;
+        type uint8;
+        description "A union of string and uint8.";
+    }
+
+    /* --- data nodes --- */
 
     list api-key {
         when "true()";
@@ -94,6 +142,66 @@ module sysrepo-mcp-test {
             type uint32;
             description
                 "Maximum number of concurrent MCP sessions.";
+        }
+
+        leaf mac {
+            type mac-address;
+            description
+                "String with length constraint and pattern (union coverage).";
+        }
+
+        leaf mac-collapsed {
+            type mac-collapsed;
+            description
+                "String with invert-match pattern.";
+        }
+
+        leaf binary-data {
+            type my-binary;
+            description
+                "Binary type.";
+        }
+
+        leaf identity-ref-val {
+            type my-identityref;
+            description
+                "Identityref with explicit base.";
+        }
+
+        leaf union-val {
+            type union {
+                type string;
+                type uint8;
+            }
+            description
+                "Union type: string or uint8.";
+        }
+
+        leaf bits-val {
+            type bits {
+                bit flag-1 {
+                    position 0;
+                    description "First flag.";
+                }
+                bit flag-2 {
+                    position 1;
+                    description "Second flag.";
+                }
+            }
+            description
+                "Bits type.";
+        }
+
+        leaf empty-val {
+            type empty;
+            description
+                "Empty type.";
+        }
+
+        leaf identity-base {
+            type my-identity;
+            description
+                "Direct identity reference (base type).";
         }
 
         list session {
