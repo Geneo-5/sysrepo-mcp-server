@@ -17,6 +17,6 @@ openssl req -x509 -newkey rsa:2048 \
   -subj "/CN=localhost" 2>/dev/null
 cat /tmp/sysrepo-mcp.key /tmp/sysrepo-mcp.crt > /tmp/sysrepo-mcp.pem
 
-sysrepo-plugind -V5
+sysrepo-plugind
 
 lighttpd -D -f ${PROJECT_DIR}/docker/lighttpd.conf

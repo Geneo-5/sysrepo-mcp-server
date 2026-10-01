@@ -19,6 +19,8 @@
 #define MCP_PROTOCOL_VERSION "2026-07-28"
 #endif
 
+/** Oldest handshake-based revision retained for backwards compatibility. */
+#define MCP_2024_PROTOCOL_VERSION "2024-10-07"
 /** Newest handshake-based revision retained for backwards compatibility. */
 #define MCP_LEGACY_PROTOCOL_VERSION "2025-11-25"
 
@@ -52,7 +54,8 @@ void serve(FCGX_Request *req);
  */
 
 void dispatch(FCGX_Request *req, const char *body, size_t len,
-	      struct mcp_session *mcp, const char *user, int modern);
+	      struct mcp_session *mcp, const char *user,
+	      int modern_protocol, int modern_method);
 
 /* ------------------------------------------------------------------- stopping
  *

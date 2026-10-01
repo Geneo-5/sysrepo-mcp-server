@@ -66,7 +66,7 @@ def test_initialize_falls_back_to_the_supported_protocol_version(mcp):
     assert result["protocolVersion"] == MCP_LEGACY_PROTOCOL_VERSION
 
 
-def modern_meta(version="2026-07-28"):
+def modern_meta(version="2024-10-07"):
     return {
         "io.modelcontextprotocol/protocolVersion": version,
         "io.modelcontextprotocol/clientInfo": {
@@ -78,10 +78,14 @@ def modern_meta(version="2026-07-28"):
 
 
 def modern_request(mcp, method, params=None, version="2026-07-28",
-                   extra_headers=None):
+                   extra_headers=None, only_header=None):
     params = dict(params or {})
     params["_meta"] = modern_meta(version)
-    headers = {"MCP-Protocol-Version": version, "Mcp-Method": method}
+    headers = {}
+    if only_header is None or only_header == "protocol":
+        headers["MCP-Protocol-Version"] = version
+    if only_header is None or only_header == "method":
+        headers["Mcp-Method"] = method
     if method == "tools/call" and "name" in params:
         headers["Mcp-Name"] = params["name"]
     if extra_headers:
@@ -103,7 +107,7 @@ def test_modern_server_discovery(mcp):
     assert result["resultType"] == "complete"
     assert result["ttlMs"] == 0
     assert result["cacheScope"] == "private"
-    assert result["supportedVersions"] == ["2026-07-28", "2025-11-25"]
+    assert result["supportedVersions"] == ["2026-07-28", "2024-10-07", "2025-11-25"]
     assert result["capabilities"]["tools"] == {}
     assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "sysrepo-mcp"
     assert "mcp-session-id" not in response.headers
@@ -134,14 +138,16 @@ def test_modern_tools_call_works_without_a_protocol_session(mcp):
     assert "mcp-session-id" not in response.headers
 
 
-def test_modern_protocol_header_mismatch_is_rejected(mcp):
+def test_modern_protocol_header_2025_is_accepted(mcp):
+    """``MCP-Protocol-Version: 2025-11-25`` seul -> servi (version supportée)."""
     response = modern_request(
         mcp, "server/discover",
         extra_headers={"MCP-Protocol-Version": "2025-11-25"},
     )
 
-    assert response.status == 400
-    assert response.json()["error"]["code"] == -32020
+    assert response.status == 200
+    result = response.json()["result"]
+    assert result["resultType"] == "complete"
 
 
 def test_modern_requests_with_origin_are_rejected_by_default(mcp):
@@ -158,7 +164,50 @@ def test_modern_unsupported_version_reports_supported_versions(mcp):
     assert response.status == 400
     error = response.json()["error"]
     assert error["code"] == -32022
-    assert error["data"]["supported"] == ["2026-07-28", "2025-11-25"]
+    assert error["data"]["supported"] == ["2026-07-28", "2024-10-07", "2025-11-25"]
+
+
+def test_modern_protocol_header_only(mcp):
+    """Send only ``MCP-Protocol-Version`` (no ``Mcp-Method``) -> served."""
+    response = modern_request(mcp, "server/discover", only_header="protocol")
+
+    assert response.status == 200
+    result = response.json()["result"]
+    assert result["resultType"] == "complete"
+    assert result["cacheScope"] == "private"
+    assert "mcp-session-id" not in response.headers
+
+
+def test_modern_method_header_only(mcp):
+    """Send only ``Mcp-Method`` (no ``MCP-Protocol-Version``) -> served."""
+    response = modern_request(mcp, "server/discover", only_header="method")
+
+    assert response.status == 200
+    result = response.json()["result"]
+    assert result["resultType"] == "complete"
+    assert "mcp-session-id" not in response.headers
+
+
+def test_modern_protocol_header_2025(mcp):
+    """Legacy protocol version accepted when only ``MCP-Protocol-Version`` is
+    sent."""
+    response = modern_request(
+        mcp, "server/discover", version=MCP_LEGACY_PROTOCOL_VERSION,
+        only_header="protocol",
+    )
+
+    assert response.status == 200
+
+
+def test_modern_method_header_mismatch_is_rejected(mcp):
+    """``Mcp-Method`` header disagrees with the JSON body -> rejected."""
+    response = modern_request(
+        mcp, "server/discover", only_header="method",
+        extra_headers={"Mcp-Method": "wrong/method"},
+    )
+
+    assert response.status == 400
+    assert response.json()["error"]["code"] == -32020
 
 
 def test_initialize_announces_the_tool_capability(mcp):

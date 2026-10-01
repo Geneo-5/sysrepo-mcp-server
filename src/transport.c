@@ -8,15 +8,15 @@
  * HTTP/RPC plumbing, MCP methods, request dispatch, FastCGI loop.
  */
 
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <unistd.h>
+#include <strings.h>
+#include <time.h>
 
 #include <json-c/json.h>
-#include <curl/curl.h>
 
 #include <sysrepo.h>
 #include <sysrepo/netconf_acm.h>
@@ -28,7 +28,22 @@
 #include <sysrepo/mcp/libconfig.h>
 #include <sysrepo/mcp/log.h>
 
-/* External state from main.c. */
+/** Longest credential (bearer token or cookie value) accepted, in bytes. */
+#define MCP_CREDENTIAL_MAX 1024
+
+/** Number of request-body bytes copied into the debug log. */
+#define MCP_LOG_BODY_MAX 240
+
+/** Value of server.auth.method when credentials travel in a cookie. */
+#define MCP_AUTH_COOKIE 2
+
+/* Protocol versions this server understands, newest first. */
+static const char *const mcp_versions[] = {
+	MCP_PROTOCOL_VERSION,
+	MCP_2024_PROTOCOL_VERSION,
+	MCP_LEGACY_PROTOCOL_VERSION,
+};
+#define MCP_VERSION_COUNT (sizeof(mcp_versions) / sizeof(mcp_versions[0]))
 
 /* ------------------------------------------------------------------- http_send
  *
@@ -43,14 +58,14 @@ http_send(FCGX_Request *req, int status, const char *extra_headers,
 	size_t len = body ? strlen(body) : 0;
 
 	FCGX_FPrintF(req->out,
-		             "Status: %d\r\n"
-		             "Content-Type: application/json\r\n"
-		             "Content-Length: %lu\r\n"
-		             "Cache-Control: no-store\r\n"
-		             "%s"
-		             "\r\n",
-		             status, (unsigned long)len,
-		             extra_headers ? extra_headers : "");
+	             "Status: %d\r\n"
+	             "Content-Type: application/json\r\n"
+	             "Content-Length: %lu\r\n"
+	             "Cache-Control: no-store\r\n"
+	             "%s"
+	             "\r\n",
+	             status, (unsigned long)len,
+	             extra_headers ? extra_headers : "");
 
 	if (len)
 		FCGX_PutStr(body, (int)len, req->out);
@@ -99,8 +114,8 @@ rpc_send_result(FCGX_Request *req, const char *extra_headers,
 }
 
 static void
-rpc_send_error(FCGX_Request *req, int status, struct json_object *id,
-               const struct mcp_err *err)
+rpc_send_error_h(FCGX_Request *req, int status, const char *extra_headers,
+                 struct json_object *id, const struct mcp_err *err)
 {
 	struct json_object *env = rpc_envelope(id);
 	struct json_object *obj = json_object_new_object();
@@ -122,47 +137,78 @@ rpc_send_error(FCGX_Request *req, int status, struct json_object *id,
 			data = json_object_new_object();
 		json_object_object_add(data, "sysrepo",
 		                       json_object_new_string(
-				       sr_strerror(err->sr_code)));
+		                               sr_strerror(err->sr_code)));
 	}
 	if (data)
 		json_object_object_add(obj, "data", data);
 
 	json_object_object_add(env, "error", obj);
-	rpc_send(req, status, NULL, env);
+	rpc_send(req, status, extra_headers, env);
+}
+
+static void
+rpc_send_error(FCGX_Request *req, int status, struct json_object *id,
+               const struct mcp_err *err)
+{
+	rpc_send_error_h(req, status, NULL, id, err);
 }
 
 static void
 rpc_fail(FCGX_Request *req, struct json_object *id, int code,
          const char *message, const char *detail)
 {
-	struct mcp_err err;
+	struct mcp_err err = {0};
 
 	mcp_err_set(&err, code, message, "%s", detail ? detail : "");
 	rpc_send_error(req, 200, id, &err);
 }
 
+/* ------------------------------------------------------------ protocol versions
+ */
+
+static int
+version_supported(const char *version)
+{
+	size_t i;
+
+	for (i = 0; i < MCP_VERSION_COUNT; i++)
+		if (!strcmp(version, mcp_versions[i]))
+			return 1;
+
+	return 0;
+}
+
+/* A fresh JSON array listing every protocol version this server speaks. */
+static struct json_object *
+supported_versions(void)
+{
+	struct json_object *versions = json_object_new_array();
+	size_t              i;
+
+	for (i = 0; i < MCP_VERSION_COUNT; i++)
+		json_object_array_add(versions,
+		                      json_object_new_string(mcp_versions[i]));
+
+	return versions;
+}
+
 static void
 modern_fail(FCGX_Request *req, int status, struct json_object *id,
-	    int code, const char *message, const char *field,
-	    const char *value)
+            int code, const char *message, const char *field,
+            const char *value)
 {
 	struct json_object *env = rpc_envelope(id);
 	struct json_object *error = json_object_new_object();
 	struct json_object *data = json_object_new_object();
 
 	json_object_object_add(error, "code", json_object_new_int(code));
-	json_object_object_add(error, "message", json_object_new_string(message));
+	json_object_object_add(error, "message",
+	                       json_object_new_string(message));
 	if (field && value)
-		json_object_object_add(data, field, json_object_new_string(value));
-	if (code == -32022) {
-		struct json_object *versions = json_object_new_array();
-		json_object_array_add(versions,
-		                      json_object_new_string(MCP_PROTOCOL_VERSION));
-		json_object_array_add(versions,
-		                      json_object_new_string(
-	                              MCP_LEGACY_PROTOCOL_VERSION));
-		json_object_object_add(data, "supported", versions);
-	}
+		json_object_object_add(data, field,
+		                       json_object_new_string(value));
+	if (code == -32022)
+		json_object_object_add(data, "supported", supported_versions());
 	if (json_object_object_length(data))
 		json_object_object_add(error, "data", data);
 	else
@@ -171,26 +217,46 @@ modern_fail(FCGX_Request *req, int status, struct json_object *id,
 	rpc_send(req, status, NULL, env);
 }
 
+/* ---------------------------------------------------------- session-scoped tools
+ *
+ * Tools that need a server-side session do not exist in the stateless
+ * protocol.
+ */
+
+static int
+tool_is_session_scoped(const char *name)
+{
+	static const char *const scoped[] = {
+		"sr_notif_subscribe",
+		"sr_notif_unsubscribe",
+		"sr_notif_list_subscriptions",
+		"sr_notif_poll",
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(scoped) / sizeof(scoped[0]); i++)
+		if (!strcmp(name, scoped[i]))
+			return 1;
+
+	return 0;
+}
+
 static void
 method_server_discover(FCGX_Request *req, struct json_object *id)
 {
 	struct json_object *result = json_object_new_object();
-	struct json_object *versions = json_object_new_array();
 	struct json_object *capabilities = json_object_new_object();
 	struct json_object *tools_cap = json_object_new_object();
 	struct json_object *meta = json_object_new_object();
 	struct json_object *info = json_object_new_object();
 
-	json_object_array_add(versions,
-	                      json_object_new_string(MCP_PROTOCOL_VERSION));
-	json_object_array_add(versions,
-	                      json_object_new_string(MCP_LEGACY_PROTOCOL_VERSION));
 	json_object_object_add(result, "resultType",
 	                       json_object_new_string("complete"));
 	json_object_object_add(result, "ttlMs", json_object_new_int(0));
 	json_object_object_add(result, "cacheScope",
 	                       json_object_new_string("private"));
-	json_object_object_add(result, "supportedVersions", versions);
+	json_object_object_add(result, "supportedVersions",
+	                       supported_versions());
 	json_object_object_add(capabilities, "tools", tools_cap);
 	json_object_object_add(result, "capabilities", capabilities);
 	json_object_object_add(info, "name",
@@ -208,33 +274,48 @@ method_server_discover(FCGX_Request *req, struct json_object *id)
 
 static void
 method_initialize(FCGX_Request *req, struct json_object *id,
-                  const char *user)
+                  struct json_object *params, const char *user)
 {
 	struct json_object *result;
 	struct json_object *caps;
 	struct json_object *tools_cap;
 	struct json_object *info;
+	struct json_object *version_obj = NULL;
 	struct mcp_session *sess;
-	char                header[128];
+	const char         *version = MCP_LEGACY_PROTOCOL_VERSION;
+	char                header[CONFIG_SYSREPO_MCP_SERVER_SESSION_ID_LEN + 32];
 	const struct mcp_config *cfg = mcp_config_get();
 
 	/* Auth: if authentication is on but no user was resolved, deny. */
 	if (cfg->auth_method > 0 && !user) {
-		struct mcp_err err;
+		struct mcp_err err = {0};
 
 		mcp_err_set(&err, MCP_ERR_DENIED, "Unauthorized",
-			    "missing or invalid API key");
+		            "missing or invalid API key");
 		rpc_send_error(req, 401, id, &err);
 		return;
 	}
 
+	/* Version negotiation: answer with the handshake-based revision the
+	 * client asked for when we support it, with our newest otherwise. */
+	if (params &&
+	    json_object_object_get_ex(params, "protocolVersion",
+	                              &version_obj) &&
+	    json_object_is_type(version_obj, json_type_string)) {
+		const char *requested = json_object_get_string(version_obj);
+
+		if (!strcmp(requested, MCP_2024_PROTOCOL_VERSION) ||
+		    !strcmp(requested, MCP_LEGACY_PROTOCOL_VERSION))
+			version = requested;
+	}
+
 	sess = session_create(user);
 	if (!sess) {
-		struct mcp_err err;
+		struct mcp_err err = {0};
 
 		mcp_err_set(&err, MCP_ERR_SERVER, "Server error",
-		            "the maximum of %d concurrent sessions is reached",
-		            mcp_config_get()->max_sessions);
+		            "the maximum of %u concurrent sessions is reached",
+		            cfg->max_sessions);
 		rpc_send_error(req, 503, id, &err);
 		return;
 	}
@@ -254,8 +335,7 @@ method_initialize(FCGX_Request *req, struct json_object *id,
 	                       json_object_new_string(CONFIG_PACKAGE_VERSION));
 
 	json_object_object_add(result, "protocolVersion",
-	                       json_object_new_string(
-	                               MCP_LEGACY_PROTOCOL_VERSION));
+	                       json_object_new_string(version));
 	json_object_object_add(result, "capabilities", caps);
 	json_object_object_add(result, "serverInfo", info);
 
@@ -277,20 +357,19 @@ method_tools_list(FCGX_Request *req, struct json_object *id, int modern)
 
 	for (i = 0; i < TOOL_COUNT; i++) {
 		struct json_object *entry;
-		if (modern && (!strcmp(tools[i].name, "sr_notif_subscribe") ||
-		               !strcmp(tools[i].name, "sr_notif_unsubscribe") ||
-		               !strcmp(tools[i].name, "sr_notif_list_subscriptions") ||
-		               !strcmp(tools[i].name, "sr_notif_poll")))
+		struct json_object *schema;
+
+		if (modern && tool_is_session_scoped(tools[i].name))
 			continue;
+
 		entry = json_object_new_object();
-		struct json_object *schema =
-		        json_tokener_parse(tools[i].schema);
+		schema = json_tokener_parse(tools[i].schema);
 
 		json_object_object_add(entry, "name",
 		                       json_object_new_string(tools[i].name));
 		json_object_object_add(entry, "description",
 		                       json_object_new_string(
-				       tools[i].description));
+		                               tools[i].description));
 		json_object_object_add(entry, "inputSchema",
 		                       schema ? schema :
 		                       json_object_new_object());
@@ -301,8 +380,9 @@ method_tools_list(FCGX_Request *req, struct json_object *id, int modern)
 		json_object_object_add(result, "resultType",
 		                       json_object_new_string("complete"));
 		/* Keep the catalogue scoped to this authorization context and
-		 * immediately stale; this is conservative if per-user filtering is
-		 * added later and avoids requiring list-change invalidation. */
+		 * immediately stale; this is conservative if per-user filtering
+		 * is added later and avoids requiring list-change
+		 * invalidation. */
 		json_object_object_add(result, "ttlMs", json_object_new_int(0));
 		json_object_object_add(result, "cacheScope",
 		                       json_object_new_string("private"));
@@ -320,10 +400,9 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 	const struct mcp_config *cfg = mcp_config_get();
 	struct json_object     *name_obj;
 	struct json_object     *args = NULL;
-	struct json_object     *write_target = NULL;
 	struct json_object     *payload;
 	struct tool_ctx         ctx = { NULL, NULL };
-	struct mcp_err          err;
+	struct mcp_err          err = {0};
 	const char             *name;
 	int                     rc;
 	const char             *effective_user = mcp ? mcp->user : user;
@@ -345,10 +424,7 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 		         "unknown tool");
 		return;
 	}
-	if (modern && (!strcmp(name, "sr_notif_subscribe") ||
-	               !strcmp(name, "sr_notif_unsubscribe") ||
-	               !strcmp(name, "sr_notif_list_subscriptions") ||
-	               !strcmp(name, "sr_notif_poll"))) {
+	if (modern && tool_is_session_scoped(name)) {
 		rpc_fail(req, id, MCP_ERR_METHOD, "Method not found",
 		         "this session-scoped tool is unavailable in stateless MCP");
 		return;
@@ -360,9 +436,9 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 	if (cfg->auth_method > 0 &&
 	    (!strcmp(desc->name, "sr_module_install") ||
 	     !strcmp(desc->name, "sr_module_uninstall"))) {
-			mcp_err_set(&err, MCP_ERR_DENIED, "Not permitted",
-			            "module install / uninstall is not permitted");
-			rpc_send_error(req, 403, id, &err);
+		mcp_err_set(&err, MCP_ERR_DENIED, "Not permitted",
+		            "module install / uninstall is not permitted");
+		rpc_send_error(req, 403, id, &err);
 		return;
 	}
 
@@ -377,18 +453,21 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 	if (desc->needs_session) {
 		rc = sr_session_start(g_conn, SR_DS_RUNNING, &ctx.sess);
 		if (rc != SR_ERR_OK) {
+			ctx.sess = NULL;
 			mcp_err_from_session(&err, NULL, rc, "sr_session_start");
 			rpc_send_error(req, 503, id, &err);
 			return;
 		}
 
-		/* NACM : lier l'identité à la session via
-		 * ``sr_nacm_set_user()`` ; le contrôle d'accès se fait dans
-		 * ``rpc_common()`` en ``rpc.c`` avant ``sr_rpc_send_tree()``. */
+		/* NACM: bind the identity to the session with
+		 * ``sr_nacm_set_user()``; the access check happens in
+		 * ``rpc_common()`` in ``rpc.c`` before ``sr_rpc_send_tree()``. */
 		if (cfg->auth_method > 0 && effective_user) {
 			rc = sr_nacm_set_user(ctx.sess, effective_user);
 			if (rc != SR_ERR_OK) {
-				mcp_err_from_session(&err, NULL, rc, "sr_nacm_set_user");
+				mcp_err_from_session(&err, NULL, rc,
+				                     "sr_nacm_set_user");
+				sr_session_stop(ctx.sess);
 				rpc_send_error(req, 503, id, &err);
 				return;
 			}
@@ -397,8 +476,8 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 
 	/* P0.8: log the identity of the requester with every operation. */
 	mcp_log_info("%s: %s called by %s",
-	            mcp ? mcp->id : "(no session)", desc->name,
-	            effective_user ? effective_user : "(anonymous)");
+	             mcp ? mcp->id : "(no session)", desc->name,
+	             effective_user ? effective_user : "(anonymous)");
 
 	payload = desc->handler(&ctx, args, &err);
 
@@ -408,13 +487,14 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 	if (!payload) {
 		if (!err.code)
 			mcp_err_set(&err, MCP_ERR_INTERNAL, "Internal error",
-		            "tool returned no result and no error");
+			            "tool returned no result and no error");
 		rpc_send_error(req, 200, id, &err);
 		return;
 	}
 
 	{
 		struct json_object *result = tool_content(payload, 0);
+
 		if (modern)
 			json_object_object_add(result, "resultType",
 			                       json_object_new_string("complete"));
@@ -426,25 +506,132 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
  * Request dispatch
  ******************************************************************************/
 
+/*
+ * Validate a request that arrived with modern (stateless) headers.
+ *
+ * Returns 1 when the request is modern and its metadata is valid, 0 when it
+ * only carries an Mcp-Method header and no _meta (a legacy request that
+ * happens to send the header: the caller must treat it as legacy), and -1
+ * once an error response has been sent.
+ *
+ * id is the request id, or NULL when the request has none.
+ */
+static int
+modern_check(FCGX_Request *req, struct json_object *id, const char *method,
+             struct json_object *params, int modern_protocol,
+             int modern_method)
+{
+	struct json_object *meta = NULL;
+	struct json_object *version_obj = NULL;
+	struct json_object *caps_obj = NULL;
+	struct json_object *client_obj = NULL;
+	const char         *body_version;
+	const char         *header_version =
+	        FCGX_GetParam("HTTP_MCP_PROTOCOL_VERSION", req->envp);
+	const char         *header_method =
+	        FCGX_GetParam("HTTP_MCP_METHOD", req->envp);
+	int                 has_meta;
+
+	has_meta = params &&
+	           json_object_object_get_ex(params, "_meta", &meta) &&
+	           json_object_is_type(meta, json_type_object);
+
+	if (!has_meta) {
+		/* A legacy handshake (protocolVersion as a top-level param, no
+		 * _meta) is legacy regardless of Mcp-Method. Only a request
+		 * that claims the modern protocol version in its headers must
+		 * carry the metadata. */
+		if (!modern_protocol)
+			return 0;
+
+		modern_fail(req, 400, id, -32020,
+		            "Missing or malformed modern request metadata",
+		            NULL, NULL);
+		return -1;
+	}
+
+	if (!json_object_object_get_ex(meta,
+	        "io.modelcontextprotocol/protocolVersion", &version_obj) ||
+	    !json_object_is_type(version_obj, json_type_string) ||
+	    !json_object_object_get_ex(meta,
+	        "io.modelcontextprotocol/clientCapabilities", &caps_obj) ||
+	    !json_object_is_type(caps_obj, json_type_object) ||
+	    !json_object_object_get_ex(meta,
+	        "io.modelcontextprotocol/clientInfo", &client_obj) ||
+	    !json_object_is_type(client_obj, json_type_object)) {
+		modern_fail(req, 400, id, -32020,
+		            "Missing or malformed modern request metadata",
+		            NULL, NULL);
+		return -1;
+	}
+	body_version = json_object_get_string(version_obj);
+
+	if (modern_protocol &&
+	    (!header_version || strcmp(header_version, body_version))) {
+		modern_fail(req, 400, id, -32020,
+		            "HTTP headers do not match request metadata",
+		            NULL, NULL);
+		return -1;
+	}
+	if (modern_method &&
+	    (!header_method || strcmp(header_method, method))) {
+		modern_fail(req, 400, id, -32020,
+		            "HTTP headers do not match request metadata",
+		            NULL, NULL);
+		return -1;
+	}
+	if (!version_supported(body_version)) {
+		modern_fail(req, 400, id, -32022,
+		            "Unsupported protocol version", "requested",
+		            body_version);
+		return -1;
+	}
+
+	if (!strcmp(method, "tools/call")) {
+		struct json_object *tool_name;
+		const char         *body_name = NULL;
+		const char         *header_name =
+		        FCGX_GetParam("HTTP_MCP_NAME", req->envp);
+
+		if (params &&
+		    json_object_object_get_ex(params, "name", &tool_name) &&
+		    json_object_is_type(tool_name, json_type_string))
+			body_name = json_object_get_string(tool_name);
+		if (!header_name || !body_name ||
+		    strcmp(header_name, body_name)) {
+			modern_fail(req, 400, id, -32020,
+			            "Mcp-Name does not match params.name",
+			            NULL, NULL);
+			return -1;
+		}
+	}
+
+	return 1;
+}
+
 void
 dispatch(FCGX_Request *req, const char *body, size_t len,
-         struct mcp_session *mcp, const char *user, int modern)
+         struct mcp_session *mcp, const char *user,
+         int modern_protocol, int modern_method)
 {
 	struct json_tokener *tok;
 	struct json_object  *root;
 	struct json_object  *id = NULL;
 	struct json_object  *method_obj;
 	struct json_object  *params = NULL;
-	struct json_object  *meta = NULL;
-	struct json_object  *version_obj = NULL;
-	struct json_object  *caps_obj = NULL;
-	struct json_object  *client_obj = NULL;
 	const char          *method;
-	const char          *body_version;
-	const char          *header_version;
-	const char          *header_method;
-	const char          *header_name;
 	int                  has_id;
+	int                  modern;
+
+	mcp_log_debug("dispatch modern_proto=%d modern_method=%d "
+	              "session=%s user=%s len=%zu",
+	              modern_protocol, modern_method,
+	              mcp ? mcp->id : "<none>",
+	              user ? user : "<none>", len);
+	mcp_log_debug("dispatch body: %.*s%s",
+	              (int)(len > MCP_LOG_BODY_MAX ? MCP_LOG_BODY_MAX : len),
+	              body,
+	              len > MCP_LOG_BODY_MAX ? "...<truncated>" : "");
 
 	tok = json_tokener_new();
 	if (!tok) {
@@ -483,59 +670,22 @@ dispatch(FCGX_Request *req, const char *body, size_t len,
 
 	method = json_object_get_string(method_obj);
 	json_object_object_get_ex(root, "params", &params);
-	if (modern) {
-		header_version = FCGX_GetParam("HTTP_MCP_PROTOCOL_VERSION",
-		                               req->envp);
-		header_method = FCGX_GetParam("HTTP_MCP_METHOD", req->envp);
-		if (!params || !json_object_object_get_ex(params, "_meta", &meta) ||
-		    !json_object_is_type(meta, json_type_object) ||
-		    !json_object_object_get_ex(meta,
-		        "io.modelcontextprotocol/protocolVersion", &version_obj) ||
-		    !json_object_is_type(version_obj, json_type_string) ||
-		    !json_object_object_get_ex(meta,
-	        "io.modelcontextprotocol/clientCapabilities", &caps_obj) ||
-		    !json_object_is_type(caps_obj, json_type_object) ||
-		    !json_object_object_get_ex(meta,
-		        "io.modelcontextprotocol/clientInfo", &client_obj) ||
-		    !json_object_is_type(client_obj, json_type_object)) {
-			modern_fail(req, 400, has_id ? id : NULL, -32020,
-			            "Missing or malformed modern request metadata",
-			            NULL, NULL);
+
+	if (modern_protocol || modern_method) {
+		int rc = modern_check(req, has_id ? id : NULL, method, params,
+		                      modern_protocol, modern_method);
+
+		if (rc < 0) {
 			json_object_put(root);
 			return;
 		}
-		body_version = json_object_get_string(version_obj);
-		if (!header_version || strcmp(header_version, body_version) ||
-		    !header_method || strcmp(header_method, method)) {
-			modern_fail(req, 400, has_id ? id : NULL, -32020,
-			            "HTTP headers do not match request metadata",
-			            NULL, NULL);
-			json_object_put(root);
-			return;
-		}
-		if (strcmp(body_version, MCP_PROTOCOL_VERSION)) {
-			modern_fail(req, 400, has_id ? id : NULL, -32022,
-			            "Unsupported protocol version", "requested",
-			            body_version);
-			json_object_put(root);
-			return;
-		}
-		if (!strcmp(method, "tools/call")) {
-			struct json_object *tool_name;
-			const char *body_name = NULL;
-			header_name = FCGX_GetParam("HTTP_MCP_NAME", req->envp);
-			if (params && json_object_object_get_ex(params, "name",
-			                                        &tool_name) &&
-			    json_object_is_type(tool_name, json_type_string))
-				body_name = json_object_get_string(tool_name);
-			if (!header_name || !body_name || strcmp(header_name, body_name)) {
-				modern_fail(req, 400, has_id ? id : NULL, -32020,
-				            "Mcp-Name does not match params.name", NULL, NULL);
-				json_object_put(root);
-				return;
-			}
+		if (rc == 0) {
+			/* Mcp-Method without _meta: a legacy request. */
+			modern_protocol = 0;
+			modern_method = 0;
 		}
 	}
+	modern = modern_protocol || modern_method;
 
 	/*
 	 * A JSON-RPC notification has no id and must never be answered with a
@@ -552,23 +702,25 @@ dispatch(FCGX_Request *req, const char *body, size_t len,
 	else if (modern && !strcmp(method, "initialize"))
 		modern_fail(req, 400, id, -32022,
 		            "initialize is not part of the stateless protocol",
-		            "requested", MCP_PROTOCOL_VERSION);
+		            NULL, NULL);
 	else if (!strcmp(method, "initialize"))
-		method_initialize(req, id, user);
+		method_initialize(req, id, params, user);
 	else if (!strcmp(method, "tools/list"))
 		method_tools_list(req, id, modern);
 	else if (!strcmp(method, "tools/call"))
 		method_tools_call(req, id, params, mcp, user, modern);
 	else if (!strcmp(method, "ping")) {
 		struct json_object *result = json_object_new_object();
+
 		if (modern)
 			json_object_object_add(result, "resultType",
 			                       json_object_new_string("complete"));
 		rpc_send_result(req, NULL, id, result);
-	}
-	else if (modern) {
-		struct mcp_err err;
-		mcp_err_set(&err, MCP_ERR_METHOD, "Method not found", "%s", method);
+	} else if (modern) {
+		struct mcp_err err = {0};
+
+		mcp_err_set(&err, MCP_ERR_METHOD, "Method not found", "%s",
+		            method);
 		rpc_send_error(req, 404, id, &err);
 	} else
 		rpc_fail(req, id, MCP_ERR_METHOD, "Method not found", method);
@@ -576,11 +728,34 @@ dispatch(FCGX_Request *req, const char *body, size_t len,
 	json_object_put(root);
 }
 
+/******************************************************************************
+ * HTTP request handling
+ ******************************************************************************/
+
+/* True when a Content-Type header value designates application/json,
+ * optionally followed by parameters such as "; charset=utf-8". */
+static int
+content_type_is_json(const char *value)
+{
+	static const char json[] = "application/json";
+	const size_t      n = sizeof(json) - 1;
+
+	while (*value == ' ' || *value == '\t')
+		value++;
+	if (strncasecmp(value, json, n))
+		return 0;
+	value += n;
+
+	return *value == '\0' || *value == ';' || *value == ' ' ||
+	       *value == '\t';
+}
+
 /* Read the request body. Returns 0 on success, or an HTTP status on failure. */
 static int
 read_body(FCGX_Request *req, char **body, size_t *len)
 {
 	const char *value;
+	char       *endp;
 	long        content_length;
 	char       *buf;
 	int         got;
@@ -589,7 +764,7 @@ read_body(FCGX_Request *req, char **body, size_t *len)
 	*len = 0;
 
 	value = FCGX_GetParam("CONTENT_TYPE", req->envp);
-	if (!value || !strstr(value, "application/json"))
+	if (!value || !content_type_is_json(value))
 		return 415;
 
 	value = FCGX_GetParam("CONTENT_LENGTH", req->envp);
@@ -597,8 +772,8 @@ read_body(FCGX_Request *req, char **body, size_t *len)
 		return 400;
 
 	errno = 0;
-	content_length = strtol(value, NULL, 10);
-	if (errno || content_length <= 0)
+	content_length = strtol(value, &endp, 10);
+	if (errno || endp == value || *endp != '\0' || content_length <= 0)
 		return 400;
 	if (content_length > MCP_MAX_BODY)
 		return 413;
@@ -608,7 +783,8 @@ read_body(FCGX_Request *req, char **body, size_t *len)
 		return 503;
 
 	got = FCGX_GetStr(buf, (int)content_length, req->in);
-	if (got < 0) {
+	if (got < 0 || got != (int)content_length) {
+		/* Error or short read: the body is incomplete. */
 		free(buf);
 		return 400;
 	}
@@ -621,7 +797,8 @@ read_body(FCGX_Request *req, char **body, size_t *len)
 }
 
 static void
-send_plain_error(FCGX_Request *req, int status, int code, const char *message)
+send_plain_error_h(FCGX_Request *req, int status, const char *extra_headers,
+                   int code, const char *message)
 {
 	struct json_object *env = rpc_envelope(NULL);
 	struct json_object *obj = json_object_new_object();
@@ -631,63 +808,117 @@ send_plain_error(FCGX_Request *req, int status, int code, const char *message)
 	                       json_object_new_string(message));
 	json_object_object_add(env, "error", obj);
 
-	rpc_send(req, status, NULL, env);
+	rpc_send(req, status, extra_headers, env);
 }
 
-static const char *
-extract_credential(FCGX_Request *req)
+static void
+send_plain_error(FCGX_Request *req, int status, int code,
+                 const char *message)
+{
+	send_plain_error_h(req, status, NULL, code, message);
+}
+
+/* Answer a read_body() failure. */
+static void
+send_body_error(FCGX_Request *req, int status)
+{
+	switch (status) {
+	case 413:
+		send_plain_error(req, 413, MCP_ERR_INVALID_REQUEST,
+		                 "Request body too large");
+		break;
+	case 415:
+		send_plain_error(req, 415, MCP_ERR_INVALID_REQUEST,
+		                 "Content-Type must be application/json");
+		break;
+	case 503:
+		send_plain_error(req, 503, MCP_ERR_INTERNAL, "Out of memory");
+		break;
+	default:
+		send_plain_error(req, 400, MCP_ERR_INVALID_REQUEST,
+		                 "Malformed request");
+		break;
+	}
+}
+
+/* Copy src[0..n) into out, trimming trailing blanks. Returns 1 on success,
+ * 0 when the value is empty or does not fit. */
+static int
+copy_credential(const char *src, size_t n, char *out, size_t outsz)
+{
+	while (n && (src[n - 1] == ' ' || src[n - 1] == '\t'))
+		n--;
+	if (n == 0 || n >= outsz)
+		return 0;
+
+	memcpy(out, src, n);
+	out[n] = '\0';
+
+	return 1;
+}
+
+/*
+ * Extract the credential (bearer token or cookie value) of a request into
+ * out. The request environment is never modified.
+ *
+ * Returns 1 when a credential was found, 0 otherwise. The cookie value is
+ * used as sent: it is not URL-decoded.
+ */
+static int
+extract_credential(FCGX_Request *req, char *out, size_t outsz)
 {
 	const struct mcp_config *cfg = mcp_config_get();
 	const char              *auth_header;
-	const char              *credential = NULL;
 
 	/* 1. Authorization: Bearer <token> */
 	auth_header = FCGX_GetParam("HTTP_AUTHORIZATION", req->envp);
-	if (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) {
-		credential = auth_header + 7;
-		/* Trim trailing whitespace / CRLF. */
-		while (*credential &&
-		       (*credential == ' ' || *credential == '\t' ||
-		        *credential == '\r' || *credential == '\n'))
-			credential++;
-		char *end = strchr(credential, ' ');
-		if (end)
-			*end = '\0';
-		end = strchr(credential, '\r');
-		if (end)
-			*end = '\0';
-		end = strchr(credential, '\n');
-		if (end)
-			*end = '\0';
-		return credential;
+	if (auth_header && !strncasecmp(auth_header, "Bearer ", 7)) {
+		const char *token = auth_header + 7;
+
+		while (*token == ' ' || *token == '\t')
+			token++;
+
+		return copy_credential(token, strcspn(token, " \t\r\n"),
+		                       out, outsz);
 	}
 
-	/* 2. Cookie <name>=<value> */
-	if (cfg->auth_method == 2) { /* == "cookie" */
+	/* 2. Cookie: <name>=<value>[; <name>=<value>...] */
+	if (cfg->auth_method == MCP_AUTH_COOKIE && cfg->cookie_name[0]) {
+		const char *p = FCGX_GetParam("HTTP_COOKIE", req->envp);
+		const size_t name_len = strlen(cfg->cookie_name);
 
-		const char *cookie_hdr =
-			FCGX_GetParam("HTTP_COOKIE", req->envp);
-		const char *needle = cfg->cookie_name;
-		size_t      needle_len = strlen(needle);
-		if (cookie_hdr) {
-			const char *found = strstr(cookie_hdr, needle);
-			if (found &&
-			    (found[needle_len] == '=' ||
-			     found[needle_len] == '%')) {
-				found += needle_len + 1;
-				char *end = strchr(found, '&');
-				if (end)
-					*end = '\0';
-				end = strchr(found, ';');
-				if (end)
-					*end = '\0';
-				/* URL-decode (simple case). */
-				return found;
-			}
+		while (p && *p) {
+			const char *end;
+
+			while (*p == ' ' || *p == '\t' || *p == ';')
+				p++;
+
+			end = strchr(p, ';');
+			if (!end)
+				end = p + strlen(p);
+
+			/* The whole name must match, not just a substring. */
+			if ((size_t)(end - p) > name_len &&
+			    !strncmp(p, cfg->cookie_name, name_len) &&
+			    p[name_len] == '=')
+				return copy_credential(p + name_len + 1,
+				                       (size_t)(end - p) -
+				                       name_len - 1,
+				                       out, outsz);
+			p = end;
 		}
 	}
 
-	return NULL;
+	return 0;
+}
+
+/* Retire what has timed out, then run the notification callbacks that arrived
+ * since the last request. */
+static void
+housekeeping(void)
+{
+	sessions_expire();
+	sessions_process_events();
 }
 
 void
@@ -701,24 +932,36 @@ serve(FCGX_Request *req)
 	char                   *body;
 	size_t                  len;
 	int                     status;
-	const char             *credential = NULL;
+	char                    credential[MCP_CREDENTIAL_MAX];
+	int                     has_credential;
 	const char             *user = NULL;
+	/* A request is "modern" (stateless) when it carries the modern
+	 * protocol version (2026-07-28) in its headers, or an Mcp-Method
+	 * header without a session identifier (dispatch() downgrades it to
+	 * legacy when its body has no _meta). A legacy protocol version in
+	 * the header, or no header at all, means the legacy (session-bound)
+	 * flow. */
 	const char             *protocol_header = FCGX_GetParam(
 	                                "HTTP_MCP_PROTOCOL_VERSION", req->envp);
-	const char             *method_header = FCGX_GetParam(
-	                                "HTTP_MCP_METHOD", req->envp);
+	const char             *method_header = FCGX_GetParam("HTTP_MCP_METHOD",
+	                                req->envp);
 	const char             *origin_header = FCGX_GetParam(
 	                                "HTTP_ORIGIN", req->envp);
-	int                     modern = protocol_header || method_header;
+	const int               has_sid = sid && *sid;
+	const int               modern_protocol =
+	    protocol_header != NULL &&
+	    !strcmp(protocol_header, MCP_PROTOCOL_VERSION);
+	const int               modern_method =
+	    method_header != NULL && !has_sid;
 
-	/* Housekeeping, once per request: retire what has timed out, then run
-	 * the notification callbacks that arrived since the last request. */
-	sessions_expire();
-	sessions_process_events();
+	mcp_log_debug("req %s proto_hdr=%s method_hdr=%s session=%s "
+	              "modern_proto=%d modern_method=%d",
+	              method ? method : "<none>",
+	              protocol_header ? protocol_header : "<none>",
+	              method_header ? method_header : "<none>",
+	              sid ? sid : "<none>",
+	              modern_protocol, modern_method);
 
-	/* Extract the credential (Bearer token or cookie) before dispatch,
-	 * so that method_initialize() can authenticate the new session. */
-	credential = extract_credential(req);
 	/* There is no browser-origin allow-list in this server. Deny requests
 	 * carrying Origin by default; native MCP clients normally omit it. */
 	if (origin_header && *origin_header) {
@@ -726,69 +969,94 @@ serve(FCGX_Request *req)
 		                 "Origin is not allowed");
 		return;
 	}
-	if (modern) {
-		if (cfg->auth_method > 0 && credential)
+
+	/* Extract the credential (Bearer token or cookie) before dispatch,
+	 * so that method_initialize() can authenticate the new session. */
+	has_credential = extract_credential(req, credential,
+	                                    sizeof(credential));
+
+	if (modern_protocol || modern_method) {
+		if (cfg->auth_method > 0 && has_credential)
 			user = mcp_config_find_key(cfg, credential);
 		if (cfg->auth_method > 0 && !user) {
-			struct mcp_err err;
+			struct mcp_err err = {0};
+
 			mcp_err_set(&err, MCP_ERR_DENIED, "Unauthorized",
 			            "missing or invalid API key");
 			rpc_send_error(req, 401, NULL, &err);
 			return;
 		}
 		if (!method || strcmp(method, "POST")) {
-			FCGX_FPrintF(req->out,
-			             "Status: 405\r\nAllow: POST\r\n\r\n");
+			send_plain_error_h(req, 405, "Allow: POST\r\n", -32015,
+			                   "Method not supported: POST");
 			return;
 		}
+
+		housekeeping();
+
 		status = read_body(req, &body, &len);
 		if (status) {
-			send_plain_error(req, status, MCP_ERR_INVALID_REQUEST,
-			                 status == 415 ? "Content-Type must be application/json" :
-			                 "Malformed request");
+			send_body_error(req, status);
 			return;
 		}
-		dispatch(req, body, len, NULL, user, 1);
+		dispatch(req, body, len, NULL, user, modern_protocol,
+		         modern_method);
 		free(body);
 		return;
 	}
 
-	/*
-	 * A supplied session identifier must resolve. HTTP 404 is what the
-	 * Streamable HTTP binding uses to tell a client its session is gone
-	 * and that it should call initialize again.
-	 */
-	if (sid && *sid) {
+	if (has_sid) {
+		/*
+		 * A supplied session identifier must resolve. HTTP 404 is what
+		 * the Streamable HTTP binding uses to tell a client its session
+		 * is gone and that it should call initialize again.
+		 */
+		housekeeping();
 		mcp = session_find(sid);
 		if (!mcp) {
-			/* New credential on a dead session: allow re-initialize. */
-			if (cfg->auth_method > 0 && credential)
-				user = mcp_config_find_key(cfg, credential);
 			send_plain_error(req, 404, MCP_ERR_NO_SESSION,
 			                 "Unknown or expired Mcp-Session-Id; "
 			                 "call initialize again");
 			return;
 		}
+
+		/* The session was authenticated during initialize and its user
+		 * is authoritative. A credential re-sent with the request must
+		 * still belong to that user: a session identifier alone does
+		 * not let a different identity ride on it. */
+		if (cfg->auth_method > 0 && has_credential) {
+			const char *cred_user = mcp_config_find_key(cfg,
+			                                            credential);
+
+			if (!cred_user || !mcp->user ||
+			    strcmp(cred_user, mcp->user)) {
+				send_plain_error(req, 403, MCP_ERR_DENIED,
+				                 "Credential does not match "
+				                 "the session");
+				return;
+			}
+		}
 		mcp->last_activity = time(NULL);
-		/* Session already authenticated during initialize; ignore
-		 * re-sent credentials — the session user is authoritative. */
 	} else {
-		/* No session yet: a new session is being created (initialize).
-		 * Look up the credential so that method_initialize() can store
-		 * the user. */
-		if (cfg->auth_method > 0 && credential)
+		/* No session yet (an empty Mcp-Session-Id counts as none): a
+		 * new session is being created (initialize), or a sessionless
+		 * request is being made. Look up the credential so that
+		 * method_initialize() can store the user. */
+		if (cfg->auth_method > 0 && has_credential)
 			user = mcp_config_find_key(cfg, credential);
-	}
 
-	/* If Authentication is configured, deny every request without a valid
-	 * credential — the server requires authentication. */
-	if (cfg->auth_method > 0 && !sid && !mcp && !user) {
-		struct mcp_err err;
+		/* If authentication is configured, deny every request without
+		 * a valid credential: the server requires authentication. */
+		if (cfg->auth_method > 0 && !user) {
+			struct mcp_err err = {0};
 
-		mcp_err_set(&err, MCP_ERR_DENIED, "Unauthorized",
-		            "missing or invalid API key");
-		rpc_send_error(req, 401, NULL, &err);
-		return;
+			mcp_err_set(&err, MCP_ERR_DENIED, "Unauthorized",
+			            "missing or invalid API key");
+			rpc_send_error(req, 401, NULL, &err);
+			return;
+		}
+
+		housekeeping();
 	}
 
 	/* DELETE terminates a session explicitly, rather than waiting for the
@@ -807,33 +1075,17 @@ serve(FCGX_Request *req)
 	}
 
 	if (!method || strcmp(method, "POST")) {
-		FCGX_FPrintF(req->out,
-		             "Status: 405\r\nAllow: POST, DELETE\r\n\r\n");
+		send_plain_error_h(req, 405, "Allow: POST, DELETE\r\n", -32015,
+		                   "Method not supported: POST, DELETE");
 		return;
 	}
 
 	status = read_body(req, &body, &len);
-
-	switch (status) {
-	case 0:
-		break;
-	case 413:
-		send_plain_error(req, 413, MCP_ERR_INVALID_REQUEST,
-		                 "Request body too large");
-		return;
-	case 415:
-		send_plain_error(req, 415, MCP_ERR_INVALID_REQUEST,
-		                 "Content-Type must be application/json");
-		return;
-	case 503:
-		send_plain_error(req, 503, MCP_ERR_INTERNAL, "Out of memory");
-		return;
-	default:
-		send_plain_error(req, 400, MCP_ERR_INVALID_REQUEST,
-		                 "Malformed request");
+	if (status) {
+		send_body_error(req, status);
 		return;
 	}
 
-	dispatch(req, body, len, mcp, user, 0);
+	dispatch(req, body, len, mcp, user, 0, 0);
 	free(body);
 }

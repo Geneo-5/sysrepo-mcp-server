@@ -141,13 +141,17 @@ def test_tool_call_without_auth(mcp_auth: McpClient) -> None:
     assert payload["error"]["code"] == MCP_ERR_DENIED
 
 
-def _modern_ping(mcp_auth: McpClient, token: str | None):
+def _modern_ping(mcp_auth: McpClient, token: str | None,
+                 only_header: str | None = None):
     """
     Send a stateless ``2026-07-28`` ``ping``, optionally with a Bearer token.
 
     The modern request format is recognised by its ``MCP-Protocol-Version`` /
     ``Mcp-Method`` headers and takes a different path in ``serve()`` from the
     legacy handshake, so it needs its own authentication coverage.
+
+    ``only_header`` when set to ``"protocol"`` or ``"method"`` sends only that
+    header, allowing independent testing of each.
     """
     body = json.dumps({
         "jsonrpc": "2.0",
@@ -165,10 +169,11 @@ def _modern_ping(mcp_auth: McpClient, token: str | None):
         },
     }).encode("utf-8")
 
-    headers = {
-        "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
-        "Mcp-Method": "ping",
-    }
+    headers: dict[str, str] = {}
+    if only_header is None or only_header == "protocol":
+        headers["MCP-Protocol-Version"] = MCP_PROTOCOL_VERSION
+    if only_header is None or only_header == "method":
+        headers["Mcp-Method"] = "ping"
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
 
@@ -410,6 +415,69 @@ def test_find_key_longer_rejected(mcp_auth: McpClient) -> None:
     )
 
     assert response.status == 401
+
+
+# -----------------------------------------------------------------------
+# Single-header auth (protocol or method header alone)
+# -----------------------------------------------------------------------
+
+
+def test_modern_no_credential_protocol_only(mcp_auth: McpClient) -> None:
+    """
+    A stateless request with only ``MCP-Protocol-Version`` and no credential
+    -> 401.
+    """
+    response = _modern_ping(mcp_auth, None, only_header="protocol")
+
+    assert response.status == 401
+
+    payload = response.json()
+
+    assert payload["error"]["code"] == MCP_ERR_DENIED
+    assert "Unauthorized" in payload["error"]["message"]
+
+
+def test_modern_no_credential_method_only(mcp_auth: McpClient) -> None:
+    """
+    A stateless request with only ``Mcp-Method`` and no credential -> 401.
+    """
+    response = _modern_ping(mcp_auth, None, only_header="method")
+
+    assert response.status == 401
+
+    payload = response.json()
+
+    assert payload["error"]["code"] == MCP_ERR_DENIED
+    assert "Unauthorized" in payload["error"]["message"]
+
+
+def test_modern_valid_credential_protocol_only(mcp_auth: McpClient) -> None:
+    """
+    A stateless request with only ``MCP-Protocol-Version`` and a valid key
+    is served.
+    """
+    response = _modern_ping(mcp_auth, "test-admin-key-0001",
+                            only_header="protocol")
+
+    assert response.status == 200
+
+    payload = response.json()
+
+    assert "result" in payload
+
+
+def test_modern_valid_credential_method_only(mcp_auth: McpClient) -> None:
+    """
+    A stateless request with only ``Mcp-Method`` and a valid key is served.
+    """
+    response = _modern_ping(mcp_auth, "test-admin-key-0001",
+                            only_header="method")
+
+    assert response.status == 200
+
+    payload = response.json()
+
+    assert "result" in payload
 
 
 def test_fail_closed_on_invalid_config(fail_closed: FailClosedResult) -> None:
