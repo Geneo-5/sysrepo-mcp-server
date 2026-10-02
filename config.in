@@ -17,7 +17,7 @@ config PACKAGE_NAME
 	default "sysrepo-mcp"
 
 config PACKAGE_VERSION
-	string 
+	string "Version"
 	default "0.0.0-unknown"
 
 
@@ -31,7 +31,7 @@ config PACKAGE_VERSION
 # =============================================================================
 
 config SYSREPO_MCP_SERVER_SYSREPO_DATASTORE_DIR
-	string
+	string "Sysrepo repository path"
 	default "/etc/sysrepo"
 	help
 		sysrepo repository directory, exported as
@@ -43,7 +43,7 @@ config SYSREPO_MCP_SERVER_SYSREPO_DATASTORE_DIR
 		sysrepo build does not agree on.
 
 config SYSREPO_MCP_SERVER_SESSION_ID_LEN
-	int
+	int "Session ID length (hex characters)"
 	range 16 256
 	default 32
 	help
@@ -52,8 +52,8 @@ config SYSREPO_MCP_SERVER_SESSION_ID_LEN
 		A 32-character ID carries 128 bits of entropy from
 		/dev/urandom, which is sufficient to prevent guessing.
 
-	config SYSREPO_MCP_SERVER_MAX_API_KEY_LEN
-	int
+config SYSREPO_MCP_SERVER_MAX_API_KEY_LEN
+	int "Maximum API key length (bytes)"
 	range 16 4096
 	default 256
 	help

@@ -215,13 +215,22 @@ export EXTRA_CFLAGS="-Werror -Wmissing-declarations -Wstrict-prototypes \
                      -O0 -ggdb3"
 export EXTRA_LDFLAGS="-Wl,-z,relro,-z,now"
 
+tag=$(cd ${PROJECT_DIR}; git describe --tags --always)
+src=$(cd ${PROJECT_DIR}; { git describe --tags --always; git status --porcelain; git diff | sha256sum | cut -c1-8; } | sha256sum | cut -c1-8)
+
+mkdir -p ${PROJECT_DIR}/build
+cat >> ${PROJECT_DIR}/build/.config <<_EOF
+
+CONFIG_PACKAGE_VERSION="0.1-${tag}-${src}"
+_EOF
+
 # Step 4: Compile binary
 log_info "Compiling in Docker container..."
 docker run --rm -u "${DOCKER_UID}" \
     -v "${PROJECT_DIR}:${PROJECT_DIR}" \
     -w "${PROJECT_DIR}" \
     "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-    make  EXTRA_CFLAGS="${EXTRA_CFLAGS}" EXTRA_LDFLAGS="${EXTRA_LDFLAGS}" clean defconfig build
+    make  EXTRA_CFLAGS="${EXTRA_CFLAGS}" EXTRA_LDFLAGS="${EXTRA_LDFLAGS}" olddefconfig build
 
 log_info "Build complete. Binary: ${PROJECT_DIR}/build/sysrepo-mcp"
 
