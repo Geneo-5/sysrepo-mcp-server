@@ -102,6 +102,163 @@ def _tail(path: Path, limit: int = 4000) -> str:
     return text[-limit:]
 
 
+# lighttpd error logs (server.errorlog) of the fixtures that started a server,
+# keyed by the name of the fixture. A failing test gets the logs of the servers
+# it depends on attached to its report (see pytest_runtest_makereport).
+_ERROR_LOGS: dict[tuple[str, str], Path] = {}
+
+# Processes started by the fixtures, keyed by fixture name: their state is
+# dumped with a failure, a process stuck in a syscall being the usual cause of
+# a client timeout.
+_PROCESSES: dict[str, subprocess.Popen] = {}
+
+# Bytes of an error log shown per failure; the start is cut when it is longer.
+# 0 shows the whole file.
+ERRORLOG_LIMIT = int(os.environ.get("SYSREPO_MCP_ERRORLOG_LIMIT", "100000"))
+
+
+def _register_errorlog(fixture: str, path: Path,
+                       label: str = "lighttpd error log") -> None:
+    """Remember the log file written by the process `fixture` started."""
+    _ERROR_LOGS[(fixture, label)] = path
+
+
+def _register_process(fixture: str, proc: subprocess.Popen) -> None:
+    """Remember a process started by `fixture`."""
+    _PROCESSES[fixture] = proc
+
+
+def _proc_read(path: Path) -> str:
+    try:
+        return path.read_text(errors="replace").strip()
+    except OSError:
+        return "?"
+
+
+def _child_pids(pid: int) -> list[int]:
+    """Direct children of `pid`, read from /proc (Linux only)."""
+    children = []
+
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            if int(fields[1]) == pid:
+                children.append(int(entry.name))
+        except (OSError, IndexError, ValueError):
+            continue
+
+    return children
+
+
+def _describe_process(pid: int, indent: str = "") -> list[str]:
+    """
+    One line per thread of `pid` and of its descendants: state and the kernel
+    function it sleeps in (wchan). (anon_)pipe_write means blocked writing to a
+    full pipe, futex_* a lock or condition wait, do_poll / unix_stream_read an
+    idle wait for a request or an answer.
+    """
+    cmdline = _proc_read(Path(f"/proc/{pid}/cmdline")).replace("\0", " ")
+    lines = [f"{indent}pid {pid}: {cmdline or '(gone)'}"]
+    tasks = sorted(Path(f"/proc/{pid}/task").glob("*"),
+                   key=lambda p: int(p.name))
+
+    for task in tasks:
+        stat = _proc_read(task / "stat")
+        state = stat.rsplit(")", 1)[-1].split()[0] if ")" in stat else "?"
+        lines.append(
+            f"{indent}  tid {task.name} {_proc_read(task / 'comm')}: "
+            f"state={state} wchan={_proc_read(task / 'wchan')}"
+        )
+
+    for child in _child_pids(pid):
+        lines.extend(_describe_process(child, indent + "  "))
+
+    return lines
+
+
+def _read_errorlog(path: Path) -> str:
+    """Content of an error log, cut at the start past ERRORLOG_LIMIT bytes."""
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        return f"(cannot read {path}: {exc})"
+
+    cut = ERRORLOG_LIMIT > 0 and len(data) > ERRORLOG_LIMIT
+    if cut:
+        data = data[-ERRORLOG_LIMIT:]
+
+    text = data.decode(errors="replace")
+    if cut:
+        text = f"[... cut, last {ERRORLOG_LIMIT} bytes of {path} ...]\n{text}"
+
+    return text or "(empty)"
+
+
+def _start_lighttpd(conf: Path, env: dict[str, str], root: Path
+                    ) -> subprocess.Popen:
+    """
+    Start lighttpd in the foreground, with its output and the one of the
+    FastCGI backend it spawns (which inherits it) going to `root`/server.out.
+
+    Never a pipe: nobody reads it while the tests run, so it fills up (64 KiB
+    on Linux) after a few dozen requests and blocks the backend in write() on
+    its next log line, which the client sees as a timeout.
+    """
+    output = root / "server.out"
+
+    with output.open("wb") as handle:
+        proc = subprocess.Popen(
+            ["lighttpd", "-D", "-f", str(conf)],
+            env=env,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+        )
+
+    proc.output_path = output  # type: ignore[attr-defined]
+
+    return proc
+
+
+def _server_output(proc: subprocess.Popen) -> str:
+    """What the server wrote to stdout / stderr so far ("" when nothing)."""
+    text = _read_errorlog(proc.output_path)  # type: ignore[attr-defined]
+
+    return "" if text == "(empty)" else text
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """
+    Attach the lighttpd error log to every failed or errored phase (setup, call
+    or teardown) of a test that uses a server fixture, so a timeout or a crash
+    comes with what lighttpd and the FastCGI backend logged.
+    """
+    outcome = yield
+    report = outcome.get_result()
+
+    if not report.failed:
+        return
+
+    for fixture, proc in _PROCESSES.items():
+        if fixture not in item.fixturenames:
+            continue
+
+        status = proc.poll()
+        if status is not None:
+            text = f"exited with code {status}"
+        else:
+            text = "\n".join(_describe_process(proc.pid))
+        report.sections.append((f"process state ({fixture})", text))
+
+    for (fixture, label), path in _ERROR_LOGS.items():
+        if fixture in item.fixturenames:
+            report.sections.append(
+                (f"{label} ({fixture}: {path})", _read_errorlog(path))
+            )
+
+
 @dataclass
 class Response:
     """An HTTP response, kept whole so tests can assert on the status too."""
@@ -854,6 +1011,7 @@ def mcp(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFactory
 
     conf = root / "lighttpd.conf"
     errorlog = root / "error.log"
+    _register_errorlog("mcp", errorlog)
     conf.write_text(
         LIGHTTPD_CONF.format(
             docroot=docroot,
@@ -872,16 +1030,14 @@ def mcp(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFactory
         )
     )
 
-    proc = subprocess.Popen(
-        ["lighttpd", "-D", "-f", str(conf)],
-        env=sysrepo_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
+    proc = _start_lighttpd(conf, sysrepo_env, root)
+    _register_process("mcp", proc)
+    _register_errorlog("mcp", proc.output_path, "server stdout/stderr")
 
     if not _wait_for_port(TEST_HOST, TEST_PORT, STARTUP_TIMEOUT):
         proc.terminate()
-        output = proc.communicate(timeout=5)[0].decode(errors="replace")
+        proc.wait(timeout=5)
+        output = _server_output(proc)
         pytest.skip(
             f"lighttpd did not listen on {TEST_HOST}:{TEST_PORT}.\n"
             f"lighttpd output:\n{output}\n"
@@ -896,15 +1052,13 @@ def mcp(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFactory
     try:
         probe = client.call("get_status", {})
     except OSError as exc:  # pragma: no cover - environment failure
-        _, output = proc.communicate(timeout=5)
-        print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
+        print(f"\n=== sysrepo-mcp server output ===\n{_server_output(proc)}\n{'='*35}", end="")
         pytest.skip(
             f"cannot reach the server: {exc}\n{_tail(errorlog)}"
         )
 
     if probe.status != 200:
-        _, output = proc.communicate(timeout=5)
-        print(f"\n=== sysrepo-mcp server output ===\n{output.decode(errors='replace')}\n{'='*35}", end="")
+        print(f"\n=== sysrepo-mcp server output ===\n{_server_output(proc)}\n{'='*35}", end="")
         proc.terminate()
         pytest.fail(
             f"the server answered HTTP {probe.status} to get_status.\n"
@@ -912,23 +1066,18 @@ def mcp(sysrepo_env: dict[str, str], tmp_path_factory: pytest.TempPathFactory
             f"lighttpd error log:\n{_tail(errorlog)}"
         )
 
-    # Debug: drain and print everything the server has written so far.
-    if proc.stdout is not None:
-        client._print_pipe(proc.stdout, "server stdout")
-    if proc.stderr is not None:
-        client._print_pipe(proc.stderr, "server stderr")
-
     yield client
 
     # When the fixture tears down, stop the server and print all output.
     proc.send_signal(signal.SIGTERM)
     try:
-        output, _ = proc.communicate(timeout=10)
+        proc.wait(timeout=10)
     except subprocess.TimeoutExpired:  # pragma: no cover - environment failure
         proc.kill()
-        output, _ = proc.communicate(timeout=5)
+        proc.wait(timeout=5)
+    output = _server_output(proc)
     if output:
-        print(f"\n=== sysrepo-mcp server output (final) ===\n{output.decode(errors='replace')}\n{'='*38}", end="")
+        print(f"\n=== sysrepo-mcp server output (final) ===\n{output}\n{'='*38}", end="")
 
 
 @pytest.fixture(scope="session")
@@ -1016,6 +1165,7 @@ def mcp_auth(
 
     conf = root / "lighttpd.conf"
     errorlog = root / "error.log"
+    _register_errorlog("mcp_auth", errorlog)
     auth_port = TEST_PORT + 1  # avoid conflict with the default 'mcp' fixture.
     conf.write_text(
         LIGHTTPD_CONF.format(
@@ -1172,6 +1322,7 @@ def fail_closed(request, nacm_config, tmp_path_factory) -> FailClosedResult:
 
     conf = root / "lighttpd.conf"
     errorlog = root / "error.log"
+    _register_errorlog("fail_closed", errorlog)
     port = TEST_PORT + (20 if mode == "absent" else (21 if mode == "syntax" else 22))
     conf.write_text(
         LIGHTTPD_CONF.format(
@@ -1397,6 +1548,8 @@ def oven_plugin(
         stdout=handle,
         stderr=subprocess.STDOUT,
     )
+    _register_process("oven_plugin", proc)
+    _register_errorlog("oven_plugin", log, "oven plugin log")
 
     # Wait until the operational callback answers, rather than sleeping a
     # fixed amount: subscription setup is not instantaneous and the delay is

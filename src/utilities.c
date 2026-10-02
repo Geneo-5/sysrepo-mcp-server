@@ -104,6 +104,20 @@ mcp_code_from_sr(int rc)
 	}
 }
 
+/* ------------------------------------------------------------------ ly_last_msg
+ *
+ * ly_err_last() returns a struct ly_err_item, not a string: the text lives in
+ * its msg member.
+ */
+
+const char *
+ly_last_msg(const struct ly_ctx *ly)
+{
+	const struct ly_err_item *item = ly ? ly_err_last(ly) : NULL;
+
+	return (item && item->msg) ? item->msg : "unknown error";
+}
+
 /* ----------------------------------------------------------------- tool_find
  *
  * Look up a tool by name (linear search).

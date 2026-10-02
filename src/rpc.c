@@ -66,7 +66,7 @@ rpc_common(struct tool_ctx *ctx, struct json_object *args, struct mcp_err *err)
 	if (lyd_new_path(NULL, ly, xpath, NULL, 0, &op) != LY_SUCCESS) {
 		mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
 			    "cannot resolve \"%s\": %s", xpath,
-			    ly_err_last(ly));
+			    ly_last_msg(ly));
 		sr_session_release_context(ctx->sess);
 		return NULL;
 	}
@@ -80,7 +80,7 @@ rpc_common(struct tool_ctx *ctx, struct json_object *args, struct mcp_err *err)
 				mcp_err_set(err, MCP_ERR_PARAMS,
 					    "Invalid params",
 					    "cannot add input parameter \"%s\": "
-					    "%s", key, ly_err_last(ly));
+					    "%s", key, ly_last_msg(ly));
 				lyd_free_all(op);
 				sr_session_release_context(ctx->sess);
 				return NULL;

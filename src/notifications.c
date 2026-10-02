@@ -402,7 +402,7 @@ tool_sr_notif_send(struct tool_ctx *ctx, struct json_object *args,
 	if (lyd_new_path(NULL, ly, xpath, NULL, 0, &notif) != LY_SUCCESS) {
 		mcp_err_set(err, MCP_ERR_NOT_FOUND, "Not found",
 			    "cannot resolve \"%s\": %s", xpath,
-			    ly_err_last(ly));
+			    ly_last_msg(ly));
 		sr_session_release_context(ctx->sess);
 		return NULL;
 	}
@@ -417,7 +417,7 @@ tool_sr_notif_send(struct tool_ctx *ctx, struct json_object *args,
 				mcp_err_set(err, MCP_ERR_VALIDATION,
 					    "Validation failed",
 					    "input \"%s\" rejected: %s", key,
-					    ly_err_last(ly));
+					    ly_last_msg(ly));
 				lyd_free_all(notif);
 				sr_session_release_context(ctx->sess);
 				return NULL;

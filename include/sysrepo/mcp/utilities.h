@@ -103,6 +103,9 @@ int mcp_code_from_sr(int rc);
 void mcp_err_set(struct mcp_err *err, int code, const char *message,
 		 const char *detail, ...);
 
+/** Last libyang error message of a context; never NULL. */
+const char *ly_last_msg(const struct ly_ctx *ly);
+
 /** Fill in a mcp_err from a sysrepo session and return code. */
 void mcp_err_from_session(struct mcp_err *err, sr_session_ctx_t *sess, int rc,
 			  const char *op);

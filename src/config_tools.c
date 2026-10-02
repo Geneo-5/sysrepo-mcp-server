@@ -285,7 +285,7 @@ tool_sr_edit_config(struct tool_ctx *ctx, struct json_object *args,
 	                       &edit) != LY_SUCCESS) {
 		mcp_err_set(err, MCP_ERR_VALIDATION, "Validation failed",
 			    "config does not match the YANG schema: %s",
-			    ly_err_last(ly));
+			    ly_last_msg(ly));
 		sr_session_release_context(ctx->sess);
 		return NULL;
 	}
