@@ -409,10 +409,23 @@ tool_sr_notif_send(struct tool_ctx *ctx, struct json_object *args,
 
 	if (input && json_object_is_type(input, json_type_object)) {
 
+			/* Check if the notification accepts any input parameters.
+			 * Notifications without children (e.g. oven-ready) must
+			 * reject any input provided by the caller. */
+			if (!lyd_child(notif)) {
+				mcp_err_set(err, MCP_ERR_PARAMS,
+					    "Invalid params",
+					    "notification \"%s\" accepts no input",
+					    xpath);
+				lyd_free_all(notif);
+				sr_session_release_context(ctx->sess);
+				return NULL;
+			}
+
 		json_object_object_foreach(input, key, val) {
 			const char *text = json_object_get_string(val);
 
-			if (lyd_new_path(notif, NULL, key, text, 0, NULL) !=
+			if (lyd_new_path(notif, ly, key, text, 0, NULL) !=
 			    LY_SUCCESS) {
 				mcp_err_set(err, MCP_ERR_VALIDATION,
 					    "Validation failed",
