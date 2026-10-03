@@ -189,6 +189,12 @@ keep state between requests need a session:
 ``sr_notif_list_subscriptions`` and ``sr_notif_poll``. Called without one they
 return ``-32008``, whose message says to call ``initialize``.
 
+.. note::
+
+   *Planned* (:doc:`todo`, P2.4): the four ``sr_txn_*`` tools, and the
+   ``stage`` argument of ``sr_edit_config`` and ``sr_delete_config``, will
+   need a session too. See `Transactions`_.
+
 Losing one
 ^^^^^^^^^^
 
@@ -322,6 +328,18 @@ Tool catalogue
    * - ``sr_diff_config``
      - implemented
      - Compare two datastores over a subtree
+   * - ``sr_txn_begin``
+     - planned
+     - Open a transaction on one datastore (needs a session)
+   * - ``sr_txn_status``
+     - planned
+     - List the operations staged so far (needs a session)
+   * - ``sr_txn_commit``
+     - planned
+     - Apply every staged operation, all or nothing (needs a session)
+   * - ``sr_txn_rollback``
+     - planned
+     - Discard the staged operations (needs a session)
    * - ``sr_get_operational``
      - implemented
      - Read operational state
@@ -474,6 +492,12 @@ sr_edit_config
    itself. ``target`` is renamed ``datastore`` for consistency with the read
    tools.
 
+.. note::
+
+   *Planned* (:doc:`todo`, P2.4): a ``stage`` argument will add the edit to
+   the session's open transaction instead of applying it. See
+   `Transactions`_.
+
 **Result**
 
 ``ok`` (boolean)
@@ -593,6 +617,12 @@ Removing one oven configuration leaf:
    The XPath is evaluated, not matched literally: ``/oven:oven`` removes the
    whole container, and a path naming a list with no predicate removes every
    entry. There is no confirmation step and no undo.
+
+.. note::
+
+   *Planned* (:doc:`todo`, P2.4): a ``stage`` argument will add the deletion
+   to the session's open transaction instead of applying it. See
+   `Transactions`_.
 
 sr_copy_config
 ~~~~~~~~~~~~~~
@@ -733,6 +763,213 @@ See :doc:`todo`, P2.3, for the planning note.
 
    Identical source and target datastores return ``-32602`` (invalid params):
    diffing a datastore against itself is a usage error, not an empty diff.
+
+Transactions
+------------
+
+*Status: planned* (:doc:`todo`, P2.4). Nothing in this section exists yet. A
+transaction lets an agent stage several edits in its session and apply them
+together, or drop them. Without one, ``sr_edit_config`` applies at once and
+the only atomic multi-step path is ``sr_copy_config`` from ``candidate``,
+which replaces the data of every module.
+
+The four ``sr_txn_*`` tools need a session, like the notification tools: a
+call without ``Mcp-Session-Id`` returns ``-32008``, and the stateless
+``2026-07-28`` tool listing omits them. The flow:
+
+1. ``initialize``, and keep the ``Mcp-Session-Id``.
+2. ``sr_txn_begin`` on one datastore.
+3. ``sr_edit_config`` and ``sr_delete_config`` with ``stage: true``, as many
+   times as needed.
+4. ``sr_txn_commit`` to apply everything at once, or ``sr_txn_rollback`` to
+   drop it.
+
+.. warning::
+
+   Staged operations are held by the server, not applied. ``sr_get_config``
+   and ``sr_diff_config`` do not show them, and nothing is locked: another
+   sysrepo client can change the datastore between ``sr_txn_begin`` and
+   ``sr_txn_commit``. To review a change before applying it, keep using
+   ``candidate`` with ``sr_diff_config``. A call made without ``stage: true``
+   while a transaction is open is applied at once, outside the transaction.
+
+sr_txn_begin
+~~~~~~~~~~~~
+
+*Status: planned.* Opens the transaction of the current session.
+
+**Arguments**
+
+``datastore`` (string, optional)
+   ``running``, ``startup`` or ``candidate``. Default ``running``. The
+   operational datastore is refused with ``-32602``.
+
+**Result**
+
+``ok`` (boolean), ``datastore`` (string), ``max_operations`` (integer, the
+value of ``server.session.txn_max_ops``), ``ttl_seconds`` (integer, the value
+of ``server.session.txn_ttl``).
+
+A session has at most one transaction: calling ``sr_txn_begin`` while one is
+open returns ``-32010``.
+
+.. code-block:: json
+
+   {
+       "jsonrpc": "2.0",
+       "id": 100,
+       "method": "tools/call",
+       "params": {
+           "name": "sr_txn_begin",
+           "arguments": {"datastore": "running"}
+       }
+   }
+
+.. code-block:: json
+
+   {
+       "jsonrpc": "2.0",
+       "id": 100,
+       "result": {
+           "ok": true,
+           "datastore": "running",
+           "max_operations": 32,
+           "ttl_seconds": 300
+       }
+   }
+
+Staging an operation
+~~~~~~~~~~~~~~~~~~~~
+
+*Status: planned.* ``sr_edit_config`` and ``sr_delete_config`` accept one more
+argument:
+
+``stage`` (boolean, optional)
+   Add the operation to the open transaction instead of applying it. Default
+   false.
+
+With ``stage: true``:
+
+- the call needs a session (``-32008``) and an open transaction (``-32009``);
+- ``datastore`` defaults to the transaction's datastore, and a different
+  value is refused with ``-32602``;
+- a transaction already holding ``server.session.txn_max_ops`` operations, or
+  more than 1 MiB of staged data, refuses the operation with ``-32010``;
+- ``sr_edit_config`` checks ``config`` against the YANG schema at once, so an
+  unknown node or an invalid value fails here. What depends on the resulting
+  datastore (``must``, ``mandatory``, leafrefs), NACM, and the existence check
+  of a ``strict`` delete are only evaluated by ``sr_txn_commit``.
+
+The result is the usual one with two more members: ``staged`` (true) and
+``staged_operations`` (integer, the number of operations now staged). Nothing
+is written to the datastore.
+
+.. code-block:: json
+
+   {
+       "jsonrpc": "2.0",
+       "id": 101,
+       "method": "tools/call",
+       "params": {
+           "name": "sr_edit_config",
+           "arguments": {
+               "stage": true,
+               "config": {"oven:oven": {"temperature": 200}}
+           }
+       }
+   }
+
+.. code-block:: json
+
+   {
+       "jsonrpc": "2.0",
+       "id": 101,
+       "result": {
+           "ok": true,
+           "staged": true,
+           "operation": "merge",
+           "edit_nodes": 2,
+           "staged_operations": 1
+       }
+   }
+
+sr_txn_status
+~~~~~~~~~~~~~
+
+*Status: planned.* Lists what is staged. Takes no argument.
+
+**Result**
+
+``open`` (boolean)
+   False when the session has no transaction, which is not an error. The
+   other members are then absent.
+
+``datastore`` (string), ``count`` (integer), ``expires_in_seconds`` (integer)
+   The transaction's datastore, the number of staged operations, and the idle
+   time left before the server discards it.
+
+``operations`` (array of objects)
+   In staging order. Each has ``index`` (from 1), ``tool``
+   (``sr_edit_config`` or ``sr_delete_config``) and, for an edit,
+   ``operation`` and ``edit_nodes``; for a deletion, ``xpath`` and ``strict``.
+
+sr_txn_commit
+~~~~~~~~~~~~~
+
+*Status: planned.* Applies every staged operation, in order, as one sysrepo
+transaction: all of them or none. It runs as the NACM user of the session.
+Takes no argument.
+
+**Result**
+
+``ok`` (boolean), ``datastore`` (string), ``operations`` (integer, how many
+were applied), ``edit_nodes`` (integer, the sum over the edits).
+
+When it fails, nothing is applied and **the transaction stays open**, so the
+agent can stage a correction or call ``sr_txn_rollback``. The error follows
+the sysrepo mapping (see `Errors`_) and its ``detail`` names the failing
+operation:
+
+.. code-block:: json
+
+   {
+       "jsonrpc": "2.0",
+       "id": 103,
+       "error": {
+           "code": -32001,
+           "message": "Not found",
+           "data": {
+               "detail": "operation 2 of 2 (sr_delete_config): no node matches the xpath"
+           }
+       }
+   }
+
+Without an open transaction the call returns ``-32009``. After a successful
+commit the session has no transaction. As with ``sr_edit_config``, changes
+made to ``running`` still have to be copied to ``startup`` to survive a
+restart.
+
+sr_txn_rollback
+~~~~~~~~~~~~~~~
+
+*Status: planned.* Discards the staged operations and closes the transaction.
+Takes no argument. It is idempotent: with no open transaction it succeeds and
+reports nothing discarded.
+
+**Result**
+
+``ok`` (boolean), ``discarded`` (integer, the number of operations dropped).
+
+Lifetime and limits
+~~~~~~~~~~~~~~~~~~~
+
+- A transaction is discarded after ``server.session.txn_ttl`` seconds without
+  a transaction call (default 300). The next call then returns ``-32009``.
+- It ends with its session: ``DELETE``, idle expiry or a server restart.
+- It holds at most ``server.session.txn_max_ops`` operations (default 32) and
+  1 MiB of staged data; past either, staging returns ``-32010``.
+- ``get_status`` reports ``active_transactions`` and, with ``verbose``,
+  ``transaction_operations`` for each session.
 
 Operational data
 ----------------
@@ -1366,6 +1603,135 @@ object. Every node carries its absolute XPath; for example the temperature
 leaf is ``/oven:oven/temperature`` and includes ``base_type: "uint8"`` and
 ``range: ["0..250"]``.
 
+Metrics endpoint
+----------------
+
+*Status: planned* (:doc:`todo`, P2.5). Nothing in this section exists yet. It
+is the one part of the HTTP surface that is neither an MCP tool nor JSON-RPC:
+a plain ``GET`` that a monitoring system can scrape, in the Prometheus text
+exposition format (version 0.0.4). It reports on the process that answers, which
+is the whole server since ``max-procs`` is 1.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 18 48
+
+   * - libconfig setting
+     - Default
+     - Description
+   * - ``server.metrics.enabled``
+     - ``false``
+     - Answer ``GET`` on the metrics path.
+   * - ``server.metrics.path``
+     - ``/mcp/metrics``
+     - Request path as the proxy forwards it. It must lie under the prefix
+       already routed to the FastCGI socket.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Request
+     - Response
+   * - ``GET`` on the path, endpoint enabled
+     - ``200``, ``Content-Type: text/plain; version=0.0.4; charset=utf-8``,
+       ``Cache-Control: no-store``.
+   * - Same, authentication on, key missing or unknown
+     - ``401`` with JSON-RPC ``-32003``, as for every other request. Any
+       valid key may read the metrics; no NACM rule is evaluated.
+   * - Any other method on the path, endpoint enabled
+     - ``405`` with ``Allow: GET``.
+   * - A request carrying an ``Origin`` header
+     - ``403``, as everywhere.
+   * - Endpoint disabled
+     - Unchanged: a ``GET`` receives ``405`` with ``Allow: POST, DELETE``.
+
+Counters start at zero when the process starts, so a restart shows as a
+reset. Labels take their values from closed sets only: nothing in them comes
+from an XPath, a user, an API key or a session identifier.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 12 20 30
+
+   * - Metric
+     - Type
+     - Labels
+     - Meaning
+   * - ``sysrepo_mcp_build_info``
+     - gauge
+     - ``version``
+     - Always 1.
+   * - ``sysrepo_mcp_start_time_seconds``
+     - gauge
+     - none
+     - Unix time of process start.
+   * - ``sysrepo_mcp_http_requests_total``
+     - counter
+     - ``method``, ``code``
+     - Responses by request method (``GET``, ``POST``, ``DELETE``,
+       ``other``) and HTTP status.
+   * - ``sysrepo_mcp_tool_calls_total``
+     - counter
+     - ``tool``
+     - ``tools/call`` requests whose handler ran.
+   * - ``sysrepo_mcp_tool_errors_total``
+     - counter
+     - ``tool``, ``code``
+     - Handler failures by JSON-RPC code (``-32000`` to ``-32008``, or
+       ``other``).
+   * - ``sysrepo_mcp_tool_duration_seconds``
+     - histogram
+     - ``tool``
+     - Wall time of the handler. Buckets: 0.005, 0.01, 0.025, 0.05, 0.1,
+       0.25, 0.5, 1, 2.5, 5, 10 seconds, and ``+Inf``.
+   * - ``sysrepo_mcp_sessions_active``
+     - gauge
+     - none
+     - Live sessions.
+   * - ``sysrepo_mcp_sessions_max``
+     - gauge
+     - none
+     - ``server.session.max_sessions``.
+   * - ``sysrepo_mcp_sessions_total``
+     - counter
+     - ``event``
+     - ``created``, ``expired``, ``deleted``, or ``rejected`` (the session
+       limit was reached, HTTP 503).
+   * - ``sysrepo_mcp_subscriptions_active``
+     - gauge
+     - none
+     - Notification subscriptions, all sessions together.
+   * - ``sysrepo_mcp_notifications_total``
+     - counter
+     - ``event``
+     - ``received``, or ``dropped`` (queue overflow). Counted for the whole
+       process: a session's own totals vanish with it.
+   * - ``sysrepo_mcp_transactions_active``
+     - gauge
+     - none
+     - Open transactions. Present once `Transactions`_ exist.
+   * - ``sysrepo_mcp_transactions_total``
+     - counter
+     - ``event``
+     - ``begun``, ``committed``, ``rolled_back``, ``expired``, or ``failed``
+       (a commit that returned an error). Present once `Transactions`_
+       exist.
+
+.. code-block:: text
+
+   # TYPE sysrepo_mcp_build_info gauge
+   sysrepo_mcp_build_info{version="0.1.0"} 1
+   # TYPE sysrepo_mcp_tool_calls_total counter
+   sysrepo_mcp_tool_calls_total{tool="get_status"} 12
+   # TYPE sysrepo_mcp_tool_duration_seconds histogram
+   sysrepo_mcp_tool_duration_seconds_bucket{tool="get_status",le="0.005"} 12
+   sysrepo_mcp_tool_duration_seconds_bucket{tool="get_status",le="+Inf"} 12
+   sysrepo_mcp_tool_duration_seconds_sum{tool="get_status"} 0.0021
+   sysrepo_mcp_tool_duration_seconds_count{tool="get_status"} 12
+   # TYPE sysrepo_mcp_sessions_active gauge
+   sysrepo_mcp_sessions_active 2
+
 Errors
 ------
 
@@ -1454,6 +1820,14 @@ The implementation-defined range, ``-32000`` to ``-32099``, as defined in
      - Session required
      - The tool keeps state between requests. Call ``initialize`` and send
        the ``Mcp-Session-Id`` header it returns.
+   * - ``-32009``
+     - No transaction
+     - *Planned (P2.4).* ``stage`` or ``sr_txn_commit`` was used with no open
+       transaction: none was begun, it was rolled back, or it expired.
+   * - ``-32010``
+     - Transaction conflict
+     - *Planned (P2.4).* ``sr_txn_begin`` while a transaction is open, or a
+       staged operation refused because the transaction is full.
    * - ``-32020``
      - Invalid request metadata
      - Stateless (``2026-07-28``) request with missing or malformed ``_meta``

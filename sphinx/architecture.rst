@@ -203,6 +203,33 @@ The cost is latency and bounded memory: an event is only noticed when the next
 request arrives, and a queue that overflows drops its oldest entries. The
 dropped count is reported by every poll rather than hidden.
 
+Transactions
+~~~~~~~~~~~~
+
+*Planned* (:doc:`todo`, P2.4). ``sr_txn_begin`` opens a transaction in the
+session, ``sr_edit_config`` and ``sr_delete_config`` called with
+``stage: true`` add operations to it, and ``sr_txn_commit`` applies them.
+
+The staged operations are kept in the MCP session as data (the ``config`` text
+with its ``operation``, or the XPath to delete), not as pending changes of a
+sysrepo session. sysrepo holds a CONTEXT READ LOCK from the first stored
+change until the changes are applied or discarded, so an idle agent would
+block ``sr_install_module()`` and every other call that needs the CONTEXT
+WRITE LOCK, in every process linked against sysrepo. Keeping the operations
+as data holds nothing between two requests.
+
+At commit the server starts one sysrepo session for the request, bound to the
+NACM user of the MCP session, replays the operations in order with
+``sr_edit_batch()`` or ``sr_delete_item()``, and calls ``sr_apply_changes()``
+once: sysrepo applies all of them or none. On any failure it calls
+``sr_discard_changes()`` and the transaction stays open, so the agent decides
+between re-staging and ``sr_txn_rollback``.
+
+Like a notification subscription, a transaction belongs to the process that
+holds its session, which is one more reason for ``max-procs = 1``. It ends
+with the session (``DELETE``, idle expiry, restart), or after
+``server.session.txn_ttl`` seconds without a transaction call.
+
 Configuration model
 -------------------
 
@@ -437,6 +464,11 @@ The tool surface is specified in :doc:`api`. Summarised by area:
    * - ``sr_diff_config``
      - implemented
      - ``sr_get_data()`` on both sides + ``lyd_diff_siblings()``
+   * - ``sr_txn_begin``, ``sr_txn_status``, ``sr_txn_commit``,
+       ``sr_txn_rollback``
+     - planned
+     - none until the commit, which replays the staged operations with
+       ``sr_edit_batch()`` / ``sr_delete_item()`` + ``sr_apply_changes()``
    * - ``sr_get_operational``
      - implemented
      - ``sr_session_switch_ds()`` + ``sr_get_data()``
@@ -473,6 +505,7 @@ The tool surface is specified in :doc:`api`. Summarised by area:
 
 "Partial" means the handler works but does not produce every member the API
 reference documents; what is missing is stated there, tool by tool.
+"Planned" means the tool is specified in the API reference and not written yet.
 
 Logging
 -------
@@ -529,6 +562,10 @@ Observability
 2. ``get_status`` with ``verbose`` set, to list the live sessions.
 3. The proxy access log for latency and status codes.
 4. syslog for the server and sysrepo library messages.
+5. *Planned* (:doc:`todo`, P2.5): a ``GET`` endpoint in the Prometheus text
+   format, answered by the server itself and off by default, with counters
+   for requests, tool calls, sessions and notifications. See *Metrics
+   endpoint* in :doc:`api`.
 
 Out of scope
 ------------
@@ -544,10 +581,10 @@ Deliberately not planned:
 - **OAuth2 or JWT credentials**: the libconfig API-key list plus NACM is the
   deliberately lighter mechanism.
 
-Possible later:
+Planned, not implemented yet (see :doc:`todo`, P2.4 and P2.5):
 
 - Transactions spanning several tool calls, with explicit commit and rollback.
-- Metrics export.
+- Metrics export, as a ``GET`` endpoint answered by the FastCGI responder.
 
 Summary
 -------
