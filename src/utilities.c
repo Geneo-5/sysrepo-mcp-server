@@ -429,7 +429,7 @@ arg_datastore(struct json_object *args, sr_datastore_t *out,
  * protocol-level JSON-RPC error.
  */
 struct json_object *
-tool_content(struct json_object *payload, int is_error)
+tool_content(struct json_object *payload, const struct mcp_err *err)
 {
 	struct json_object *result = json_object_new_object();
 	struct json_object *content = json_object_new_array();
@@ -446,7 +446,7 @@ tool_content(struct json_object *payload, int is_error)
 	json_object_object_add(result, "structuredContent",
 			       json_object_get(payload));
 	json_object_object_add(result, "isError",
-			       json_object_new_boolean(is_error));
+			       json_object_new_boolean(err && err->code != 0));
 
 	json_object_put(payload);
 

@@ -409,3 +409,20 @@ def test_get_status_verbose_lists_sessions(mcp):
 
 def test_get_status_without_verbose_omits_the_session_list(mcp):
     assert "sessions" not in mcp.tool("get_status", {"verbose": False})
+
+
+# ---------------------------------------------------------------------------
+# P1.5: sr_edit_config déclare config (required), pas xpath
+# ---------------------------------------------------------------------------
+
+
+def test_sr_edit_config_declares_config_required(catalogue):
+    schema = catalogue["sr_edit_config"]["inputSchema"]
+    required = schema.get("required", [])
+
+    assert "config" in required, (
+        "sr_edit_config must declare config (required)"
+    )
+    assert "xpath" not in required, (
+        "sr_edit_config must NOT require xpath"
+    )

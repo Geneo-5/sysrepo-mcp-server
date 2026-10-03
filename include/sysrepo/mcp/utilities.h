@@ -184,7 +184,7 @@ extern time_t                 g_start_time;
 
 /** Wrap a tool payload in the MCP content envelope. */
 struct json_object *tool_content(struct json_object *payload,
-				 int is_error);
+				 const struct mcp_err *err);
 
 #ifdef __cplusplus
 }

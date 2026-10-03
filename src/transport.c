@@ -493,7 +493,7 @@ method_tools_call(FCGX_Request *req, struct json_object *id,
 	}
 
 	{
-		struct json_object *result = tool_content(payload, 0);
+		struct json_object *result = tool_content(payload, &err);
 
 		if (modern)
 			json_object_object_add(result, "resultType",
