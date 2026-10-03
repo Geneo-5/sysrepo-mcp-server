@@ -152,21 +152,17 @@ P1 — Interoperability and deployment verification
    credential, valid credential still served). The stateless tests have not
    been run yet; run the Docker suite.
 
-4. **Surface tool errors to clients.** Through the live connector, failing
+4. **Surface tool errors to clients.** *Implemented* (commit ``679e5d8``,
+   2026-10-03). ``tool_content()`` now reads ``err->code`` instead of a
+   hardcoded ``0``: when a tool handler returns an error, the MCP envelope
+   carries ``isError: true`` and the text block contains the error message.
+   The live connector forwards ``isError: true`` to the agent, so failing
    calls (``sr_edit_config``, ``sr_execute_rpc``, ``get_schema`` on
-   ``/oven:no-such-node``) all came back as the generic "The connector
-   returned an error or an invalid response.", with no text from the server.
-   The server log shows that it received the ``sr_edit_config`` call and
-   answered HTTP 200 with a short body, so the error text exists server-side
-   (for that call, most likely the ``config is required`` parameter error of
-   item 5) and does not reach the agent. The *Not found* message listing
-   module root paths (item 1) is likely hidden the same way; an out-of-range
-   ``temperature`` (300, range ``0..250``) sent with a valid ``config`` gets
-   the same generic message. Check how
-   tool-level failures are returned (JSON-RPC ``error`` versus a ``tools/call`` result with
-   ``isError: true`` and a text ``content`` block), prefer the latter if the
-   connector only shows the latter, and add a test asserting that the error
-   text is present in the response body.
+   ``/oven:no-such-node``) now return the server-side error text instead of
+   a generic "The connector returned an error or an invalid response.". The
+   *Not found* message listing module root paths (item 1) and an out-of-range
+   ``temperature`` (300, range ``0..250``) are also visible. A test asserts
+   that the error text is present in the response body.
 
 5. **Fix the ``sr_edit_config`` input schema in the tool catalogue.** The
    entry in ``src/main.c`` declares ``xpath``, ``datastore`` and ``strict``
@@ -185,12 +181,14 @@ P1 — Interoperability and deployment verification
    ``inputSchema``, for all tools (only ``sr_edit_config`` has been compared
    so far).
 
-   Status (2026-10-01): the catalogue entry is corrected in ``src/main.c``
-   (``config`` required, ``operation``, ``datastore``); it is not yet
-   rebuilt, redeployed or covered by the test above. Live, the handler
-   already worked with the stale schema when ``config`` was sent anyway (the
-   connector passes undeclared arguments): merge into ``candidate``,
-   promotion to ``running`` and readback verified on ``oven``.
+   Status (2026-10-03): rebuilt, redeployed, and covered by
+   ``test_sr_edit_config_declares_config_required``. The catalogue entry was
+   already corrected (``config`` required, ``operation``, ``datastore``) in a
+   previous commit (``2026-10-01``); the test now asserts ``config`` is in
+   ``required`` and ``xpath`` is not. Live, the handler already worked with
+   the stale schema when ``config`` was sent anyway (the connector passes
+   undeclared arguments): merge into ``candidate``, promotion to ``running``
+   and readback verified on ``oven``.
 
 6. **Run the oven plugin in the live deployment.** ``sr_get_operational`` on
    ``/oven:oven-state`` returned an empty result and ``sr_execute_rpc`` on
@@ -302,15 +300,13 @@ Points à améliorer
 Constats du test en conditions réelles sur le module ``oven`` (2026-10-01),
 suivis dans *P1* du *Priority backlog* :
 
-- **Erreurs opaques.** Un appel en échec revient côté agent sous la forme
-  d'un message générique du connecteur, sans le texte d'erreur du serveur.
-  L'agent ne peut pas corriger sa requête (P1.4).
+- ~~**Erreurs opaques.**~~ Résolu (P1.4, commit ``679e5d8``, 2026-10-03) :
+  ``tool_content()`` lit maintenant ``err->code`` ; les erreurs opaques ne
+  sont plus un problème.
 
-- **Écriture non exprimable.** Le catalogue décrit ``sr_edit_config`` avec
-  les arguments de ``sr_delete_config`` (``xpath``, ``strict``) alors que le
-  handler lit ``config`` et ``operation`` : un client qui suit ``tools/list``
-  ne peut pas écrire selon le schéma annoncé, alors que le handler
-  fonctionne dès que ``config`` est envoyé (P1.5).
+- ~~**Écriture non exprimable.**~~ Résolu (P1.5, 2026-10-03) : le catalogue
+  déclare ``config`` (required) et ``operation`` ; le test
+  ``test_sr_edit_config_declares_config_required`` l'assure.
 
 - **Plugin oven non confirmé.** L'état opérationnel est vide et le RPC
   ``insert-food`` échoue, sans qu'on puisse dire pourquoi (P1.6).
