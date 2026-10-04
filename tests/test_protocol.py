@@ -426,3 +426,61 @@ def test_sr_edit_config_declares_config_required(catalogue):
     assert "xpath" not in required, (
         "sr_edit_config must NOT require xpath"
     )
+
+
+# ---------------------------------------------------------------------------
+# P1.2 : chaque argument lu par un handler est déclaré dans son inputSchema
+# ---------------------------------------------------------------------------
+
+# Mapping manuel : chaque handler lit des arguments depuis l'objet `args`.
+# Ce dictionnaire est la source de vérité extraite du code C (src/*.c).
+# Si un argument est manquant de inputSchema, le test échoue : c'est un drift.
+_HANDLER_ARGS: dict[str, frozenset[str]] = {
+    "sr_get_config": frozenset(("xpath", "max_depth", "datastore")),
+    "sr_edit_config": frozenset(("config", "operation", "datastore")),
+    "sr_delete_config": frozenset(("xpath", "strict", "datastore")),
+    "sr_copy_config": frozenset(("source", "destination")),
+    "sr_diff_config": frozenset(("xpath", "source", "destination", "max_depth")),
+    "sr_get_operational": frozenset(("xpath", "max_depth", "timeout_ms")),
+    "sr_execute_rpc": frozenset(("xpath", "input", "timeout_ms")),
+    "sr_action": frozenset(("xpath", "input", "timeout_ms")),
+    "sr_notif_subscribe": frozenset(("module", "xpath", "replay_start")),
+    "sr_notif_unsubscribe": frozenset(("subscription_id",)),
+    "sr_notif_list_subscriptions": frozenset(),
+    "sr_notif_poll": frozenset(("max", "peek")),
+    "sr_notif_send": frozenset(("xpath", "input")),
+    "sr_list_modules": frozenset(("implemented_only",)),
+    "sr_module_install": frozenset(("yang_file", "search_dirs", "features")),
+    "sr_module_uninstall": frozenset(("module", "force")),
+    "get_schema": frozenset(("xpath", "max_depth")),
+    "get_status": frozenset(("verbose",)),
+}
+
+
+@pytest.mark.parametrize("tool_name,expected_keys", sorted(_HANDLER_ARGS.items()))
+def test_inputSchema_declares_all_handler_arguments(
+    catalogue: dict, tool_name: str, expected_keys: frozenset[str]
+):
+    """Chaque argument que le handler de *tool_name* lit dans `args`
+    doit être déclaré dans son `inputSchema.properties`.
+
+    Les arguments optionnels (sans valeur par défaut) ne sont pas forcés
+    dans ``required`` mais doivent exister dans ``properties``.
+    """
+    schema = catalogue[tool_name]["inputSchema"]
+    declared = set(schema.get("properties", {}))
+
+    missing = expected_keys - declared
+    assert missing == set(), (
+        f"{tool_name} lit {missing} que son schéma ne déclare pas"
+    )
+
+    # Vérifier que chaque argument requis est bien dans required
+    required: list[str] = schema.get("required", [])
+    # Les arguments optionnels ne doivent PAS figurer dans required
+    optional_expected = expected_keys - frozenset(required)
+    for opt_key in sorted(optional_expected):
+        assert opt_key not in required, (
+            f"{tool_name} déclare {opt_key} comme requis, "
+            "alors que le handler utilise une valeur par défaut"
+        )
