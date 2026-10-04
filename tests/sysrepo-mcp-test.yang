@@ -153,6 +153,18 @@ module sysrepo-mcp-test {
                 "Union type: string or uint8.";
         }
 
+        leaf nested-union-val {
+            type union {
+                type union {
+                    type string;
+                    type uint16;
+                }
+                type int32;
+            }
+            description
+                "Nested union: (string | uint16) | int32.";
+        }
+
         leaf bits-val {
             type bits {
                 bit flag-1 {

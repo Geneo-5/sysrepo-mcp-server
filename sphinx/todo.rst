@@ -23,13 +23,7 @@ corresponding API/architecture pages and in the git history.
 P1 — Interoperability and deployment verification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. **Expand nested unions in ``get_schema``.** ``union`` leaves report their
-   member types, but a union of unions is reported as ``type: union`` without
-   expanding the inner members. The test module ``sysrepo-mcp-test.yang``
-   does not exercise this case yet, and no real-world model uses it: add a
-   nested union to the fixture, then expand it in ``add_union_member()``.
-
-2. **Declare every handler argument in its ``inputSchema``.** Only
+1. **Declare every handler argument in its ``inputSchema``.** Only
    ``sr_edit_config`` has been checked
    (``test_sr_edit_config_declares_config_required``). Add a test asserting
    that every argument a handler reads is declared in its ``inputSchema``,

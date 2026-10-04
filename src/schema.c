@@ -602,6 +602,13 @@ add_union_member(struct json_object *members, const struct lysc_type *type)
 		json_object_object_add(member, "require-instance",
 			json_object_new_boolean(lr->require_instance));
 		break;
+	case LY_TYPE_UNION:
+		LY_ARRAY_FOR(((struct lysc_type_union *)type)->types, u) {
+			mtype = ((struct lysc_type_union *)type)->types[u];
+			add_union_member(members, mtype);
+		}
+		json_object_object_add(member, "members", members);
+		break;
 	default:
 		break;
 	}
