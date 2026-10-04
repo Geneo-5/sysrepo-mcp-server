@@ -23,12 +23,11 @@ corresponding API/architecture pages and in the git history.
 P1 — Interoperability and deployment verification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. **Declare every handler argument in its ``inputSchema``.** Only
-   ``sr_edit_config`` has been checked
-   (``test_sr_edit_config_declares_config_required``). Add a test asserting
-   that every argument a handler reads is declared in its ``inputSchema``,
-   for all tools, and fix any tool where the catalogue in ``src/main.c``
-   drifts from the handler.
+1. **Declare every handler argument in its ``inputSchema``.** [implémenté]
+   Un test paramétré (*test_inputSchema_declares_all_handler_arguments*)
+   vérifie que chaque argument que le handler C lit via ``arg_*()`` est
+   déclaré dans ``inputSchema.properties``.  Si un nouveau handler apparaît,
+   le test le signalera.
 
 P2 — Protocol, agent and operator capabilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
